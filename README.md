@@ -24,7 +24,7 @@ but it implements the most needed, basic functionality:
 * Use `i` to install apps, and `r` to remove apps.  When you install or remove an app, `appman` drops out of `curses` mode, runs the `appman` command so you can see the result, and then prompts your to hit ENTER to return to `vappman.
 
 ## Example Screenshot
-![vappman-with-filter](images/vappman-with-filter.png).
+![vappman-with-filter](https://github.com/joedefen/vappman/blob/main/images/vappman-with-filter.png).
 
 ---
 
