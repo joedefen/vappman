@@ -14,6 +14,7 @@ Interactive, visual thin layer atop appman
 import os
 import sys
 import re
+import shutil
 import subprocess
 import traceback
 import copy
@@ -38,7 +39,8 @@ class Vappman:
         spin = self.spin = OptionSpinner()
         spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
 
-        other = 'ir/q'
+        # EXPAND
+        other = 'airbou/qscU'
         other_keys = set(ord(x) for x in other)
         self.opts = spin.default_obj
 
@@ -48,11 +50,27 @@ class Vappman:
         # self.verbs = {'i': 'install', 'r': 'remove', 'v': 'view',}
         self.prev_filter = '' # string
         self.filter = None # compiled pattern
+        self.check_preqreqs()
         self.apps = self.cmd_dict('appman list')
         self.installs = self.get_installed() # dict keyed by app
         self.win = Window(head_line=True, body_rows=len(self.apps)+20, head_rows=10,
                           keys=spin.keys ^ other_keys, mod_pick=self.mod_pick)
 
+    @staticmethod
+    def check_preqreqs():
+        """ Check that needed programs are installed. """
+        ok = True
+        for prog in 'curl grep jq sed wget appman'.split():
+            if shutil.which(prog) is None:
+                ok = False
+                print(f'ERROR: cannot find {prog!r} on $PATH')
+                if prog == 'appman':
+                    print('Install appman with:')
+                    print("""mkdir -p ~/.local/bin && cd /tmp &&"""
+                          """ wget https://raw.githubusercontent.com/ivan-hc/AM/main/APP-MANAGER"""
+                          """ -O appman && chmod a+x ./appman && mv ./appman ~/.local/bin/appman""")
+        if not ok:
+            sys.exit(1)
 
     def cmd_dict(self, cmd, start='◆ '):
         """ Get lines with the given start."""
@@ -89,13 +107,22 @@ class Vappman:
                 self.win.set_pick_mode(False)
                 self.spin.show_help_nav_keys(self.win)
                 self.spin.show_help_body(self.win)
+                # EXPAND
                 lines = [
                     'ALWAYS AVAILABLE:',
-                    '   / - filter apps',
                     '   q - quit program (CTL-C disabled)',
+                    '   a - about (more info about app)',
+                    '   s - sync (update appman itself)',
+                    '   c - clean (remove unneeded files/folters)',
+                    '   U - update ALL installed apps',
+                    '   / - filter apps',
                     'CONTEXT SENSITIVE:',
                     '   i - install uninstalled app',
                     '   r - remove installed app',
+                    '   b - backup installed app',
+                    '   u - update installed app',
+                    '   o - overwrite app from its backup',
+
                 ]
                 for line in lines:
                     self.win.put_body(line)
@@ -122,11 +149,13 @@ class Vappman:
 
     def get_keys_line(self):
         """ TBD """
+        # EXPAND
         filt = self.prev_filter if self.prev_filter else '{No-Filt}'
         line = 'KEYS:'
         for key, verb in self.actions.items():
             line += f' {key}:{verb}'
-        line += f' ?:help q:quit /{filt}  '
+        # or EXPAND
+        line += f' ?:help q:quit a:about s:sync c:clean U:upd /{filt}  '
         # for action in self.actions:
             # line += f' {action[0]}:{action}'
         return line
@@ -139,8 +168,12 @@ class Vappman:
             line = lines[self.win.pick_pos]
             app = self.get_word1(line)
             self.pick_is_installed = bool(app in self.installs)
+            # EXPAND
             if self.pick_is_installed:
-                actions['r'] = 'remove'
+                actions['r'] = 'rmv'
+                actions['b'] = 'bkup'
+                actions['o'] = 'overwr'
+                actions['u'] = 'upd'
             else:
                 actions['i'] = 'install'
 
@@ -170,6 +203,12 @@ class Vappman:
 #           line = line[0:-over]
 
 #       return line + suffix
+    def run_appman(self, cmd):
+        Window.stop_curses()
+        os.system(f'clear; stty sane; {cmd};'
+                  + ' echo -e "\n\nHit ENTER to return to menu"; read FOO')
+        self.installs = self.get_installed()
+        Window._start_curses()
 
     def do_key(self, key):
         """ TBD """
@@ -201,22 +240,28 @@ class Vappman:
             sys.exit(0)
 
         if key == ord('i') and not self.pick_is_installed:
-            # pylint: disable=protected-access
-            Window.stop_curses()
-            os.system(f'clear; stty sane; appman install {self.pick_app};'
-                      + ' echo -e "\n\nHit ENTER to return to menu"; read FOO')
-            self.installs = self.get_installed()
-            Window._start_curses()
+            self.run_appman(f'appman install {self.pick_app}')
             return None
 
         if key == ord('r') and self.pick_is_installed:
-            # pylint: disable=protected-access
-            Window.stop_curses()
-            os.system(f'clear; stty sane; appman remove {self.pick_app};'
-                      + ' echo -e "\n\nHit ENTER to return to menu"; read FOO')
-            self.installs = self.get_installed() # dict keyed by app
-            Window._start_curses()
+            self.run_appman(f'appman remove {self.pick_app}')
             return None
+
+        if key == ord('s'):
+            self.run_appman('appman sync')
+        if key == ord('c'):
+            self.run_appman('appman clean')
+        if key == ord('b'):
+            self.run_appman(f'appman backup {self.pick_app}')
+        if key == ord('o'):
+            self.run_appman(f'appman overwrite {self.pick_app}')
+        if key == ord('a'):
+            self.run_appman(f'appman about {self.pick_app}')
+        if key == ord('u'):
+            self.run_appman(f'appman update {self.pick_app}')
+        if key == ord('U'):
+            self.run_appman(f'appman update')
+        # EXPAND
 
         if key == ord('/'):
             # pylint: disable=protected-access
