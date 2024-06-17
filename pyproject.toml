@@ -35,7 +35,7 @@
 # PUBLIC Build and deploy (from project directory):
 #   ## BUMP the version (below in [project])
 #   rm -rf dist; python3 -m build; ls dist/.
-#   python3 -m twine upload dist/* # keyring --disable # may be required
+#   python3 -m twine upload dist/*     # keyring --disable # may be required
 #     ## Enter __token__ and the saved TOKEN (in bitwarden)
 #   pipx upgrade pwr-tray || pipx install pwr-tray # >= python3.11
 #   --OR-- sudo python3 -m pip install pwr-tray # <= python3.10
@@ -55,7 +55,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vappman"
-version = "0.5"
+version = "0.6"
 description = "A visual wrapper for appman"
 authors = [
     { name = "Joe Defen", email = "joedef@google.com" }

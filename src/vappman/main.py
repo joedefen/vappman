@@ -33,21 +33,19 @@ class Vappman:
         assert not Vappman.singleton
         Vappman.singleton = self
 
-        self.summary_lines = []
-        self.new_summary_lines = True
-
         spin = self.spin = OptionSpinner()
         spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
 
         # EXPAND
         other = 'airbou/qscU'
         other_keys = set(ord(x) for x in other)
+        other_keys.add(cs.KEY_ENTER)
+        other_keys.add(10) # another form of ENTER
         self.opts = spin.default_obj
 
         self.actions = {} # currently available actions
         self.pick_app = '' # current picked app
         self.pick_is_installed = False
-        # self.verbs = {'i': 'install', 'r': 'remove', 'v': 'view',}
         self.prev_filter = '' # string
         self.filter = None # compiled pattern
         self.check_preqreqs()
@@ -95,7 +93,7 @@ class Vappman:
 
     def get_installed(self):
         """ Get the list of lines of installed apps """
-        rv = self.cmd_dict('appman files --by-name')
+        rv = self.cmd_dict('appman files --byname')
         return rv
 
     def main_loop(self):
@@ -116,6 +114,7 @@ class Vappman:
                     '   c - clean (remove unneeded files/folters)',
                     '   U - update ALL installed apps',
                     '   / - filter apps',
+                    '   ENTER = install, remove, or return from help',
                     'CONTEXT SENSITIVE:',
                     '   i - install uninstalled app',
                     '   r - remove installed app',
@@ -133,15 +132,15 @@ class Vappman:
                 # self.win.set_pick_mode(self.opts.pick_mode, self.opts.pick_size)
                 self.win.set_pick_mode(True)
                 self.win.add_header(self.get_keys_line(), attr=cs.A_BOLD)
-                for line in self.installs.values():
+                for app, line in self.installs.items():
+                    if app in self.apps:
+                        line = self.apps[app]
                     if wanted(line):
+                        line = '✔✔✔' + line[1:]
                         self.win.add_body(line)
                 for app, line in self.apps.items():
                     if app not in self.installs and wanted(line):
                         self.win.add_body(line)
-#           if self.new_summary_lines:
-#               self.win.pick_pos = self.win.scroll_pos = 0
-#               self.new_summary_lines = False
             self.win.render()
 
             _ = self.do_key(self.win.prompt(seconds=300))
@@ -206,34 +205,27 @@ class Vappman:
     def run_appman(self, cmd):
         Window.stop_curses()
         os.system(f'clear; stty sane; {cmd};'
-                  + ' echo -e "\n\nHit ENTER to return to menu"; read FOO')
+                  + ' /bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
         self.installs = self.get_installed()
         Window._start_curses()
 
     def do_key(self, key):
         """ TBD """
-        def dashes(ns, ok=True):
-            try:
-                # use checkmark or circle-backslash
-                filler = ('\u2713' if ok else '\u2342') * (ns.end - ns.start)
-                line = self.summary_lines[self.win.pick_pos]
-                line = line[0:ns.start] + filler + line[ns.end:]
-                self.summary_lines[self.win.pick_pos] = line
-                self.win.draw(self.win.pick_pos, 0, line, width=self.win.get_pad_width(), header=False)
-                self.win.fix_positions(delta=1)
-                self.win.render()
-            except Exception:
-                pass
-
         if not key:
             return True
+        if key == cs.KEY_ENTER or key == 10: # Handle ENTER
+            if self.opts.help_mode:
+                self.opts.help_mode = False
+                return True
+            elif self.pick_is_installed:
+                key = ord('r') # removed installed app
+            else:
+                key = ord('i') # install uninstalled app
+
         if key in self.spin.keys:
             value = self.spin.do_key(key, self.win)
-            if key in (ord('p'), ord('s')):
-                self.win.set_pick_mode(on=self.opts.pick_mode, pick_size=self.opts.pick_size)
-            elif key == ord('n'):
-                self.win.alert(title='Info', message=f'got: {value}')
             return value
+        
         if key == ord('q'):
             self.win.stop_curses()
             os.system('clear; stty sane')

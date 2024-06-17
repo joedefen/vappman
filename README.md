@@ -29,9 +29,16 @@ But it does NOT cover:
 * It presents some keys available on the top line.
     * Use '?' to learn the navigation keys (e.g., you can use the mouse wheel,
       arrow keys, and many `vi`-like keys)
+    * '?' also elaborates the meaning of the available keys for operations.
+    * NOTE: `ENTER` acts differently based on context:
+      * In help, it returns to the main menu.
+      * On an uninstalled app, it installs it.
+      * On an installed app, it uninstalls it.
 * Then `vappman` presents a list of installed apps, followed by available/uninstalled apps.
+    * Installed apps have prefix '✔✔✔' (i.e., three checks).
+    * Uninstalled apps have prefix '◆' (i.e., a solid diamond).
 * Enter `/` to enter a "filter" for installed/uninstalled apps, if you wish.
-    * If you enter plain old "words", then those words must match the beginning of words
+    * If you enter plain ole "words", then those words must match the beginning of words
       of the apps or descriptions (in order, but not contiguously).
     * Or you can enter an regular expression acceptable to python (e.g., `\b` means word
       boundary, etc.)
@@ -43,9 +50,11 @@ But it does NOT cover:
 ---
 
 NOTES: in this example:
-* the filter is `card` so it shows apps with words starting with `card`.
-* the current position is on `glabels`; thus if `i` is typed, `appman install glabels` is run.
+* the filter is `card` so it shows app lines with words starting with `card`.
+* the reverse video, current position is on `glabels`;
+  thus if `i` (or ENTER) is typed, `appman install glabels` is run.
 * if the horizontal line (second line show) has no decorations, then you are looking
   all the filtered apps; otherwise, the decoration suggests where you are in the
   partial view of the filtered apps.
+* the matching installed app has the '✔✔✔' prefix.
 
