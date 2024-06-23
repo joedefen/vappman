@@ -38,10 +38,16 @@ But it does NOT cover:
     * Installed apps have prefix '✔✔✔' (i.e., three checks).
     * Uninstalled apps have prefix '◆' (i.e., a solid diamond).
 * Enter `/` to enter a "filter" for installed/uninstalled apps, if you wish.
-    * If you enter plain ole "words", then those words must match the beginning of words
-      of the apps or descriptions (in order, but not contiguously).
-    * Or you can enter an regular expression acceptable to python (e.g., `\b` means word
-      boundary, etc.)
+    * If you enter plain ole "words", then those words must match:
+      * the start of words on the apps line (in order, but not contiguously) and/or
+      * the start of the remainder of the previous word match
+        (i.e., `/bit fight` matches `bitfighter`).
+    * Or you can enter an regular expression acceptable to python; e.g.,
+      * `^` matches the line starting with the app name
+      * `\b` matches a word boundary; and so forth.
+    * NOTES:
+      * `ESC` clears the filter and jumps to the top of the listing.
+      * Each time the filter is changed, the position jumps to the top of the listing.
 * Use `i` to install apps, and `r` to remove apps.  When you install or remove an app, `appman` drops out of `curses` mode, runs the `appman` command so you can see the result, and then prompts your to hit ENTER to return to `vappman.
 
 ## Example Screenshot
@@ -57,4 +63,8 @@ NOTES: in this example:
   all the filtered apps; otherwise, the decoration suggests where you are in the
   partial view of the filtered apps.
 * the matching installed app has the '✔✔✔' prefix.
+* the fixed top line shows some of the available action keys (e.g., `q` quits the app)
+* use `?` to open the help screen describing all keys (including navigation)
 
+## Screen Recording (Intro to vappman)
+[![Screen Recording](https://i9.ytimg.com/vi_webp/NUHYN9_DZtA/mq3.webp?sqp=CMTu4LMG-oaymwEmCMACELQB8quKqQMa8AEB-AHqBYAC4AOKAgwIABABGEogZShRMA8=&rs=AOn4CLBaBrOpAhJkRIQQNNdCzYaqpOYl-Q)](https://youtu.be/NUHYN9_DZtA)

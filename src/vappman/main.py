@@ -6,7 +6,7 @@ Interactive, visual thin layer atop appman
 # pylint: disable=broad-exception-caught,consider-using-with
 # pylint: disable=too-many-instance-attributes,too-many-branches
 # pylint: disable=too-many-return-statements,too-many-statements
-
+# pylint: disable=consider-using-in
 # pylint: disable=wrong-import-position,disable=wrong-import-order
 # import VirtEnv
 # VirtEnv.ensure_venv(__name__)
@@ -17,10 +17,7 @@ import re
 import shutil
 import subprocess
 import traceback
-import copy
-import shutil
 import curses as cs
-from types import SimpleNamespace
 from vappman.PowerWindow import Window, OptionSpinner
 
 
@@ -40,6 +37,7 @@ class Vappman:
         other = 'airbou/qscU'
         other_keys = set(ord(x) for x in other)
         other_keys.add(cs.KEY_ENTER)
+        other_keys.add(27) # ESCAPE
         other_keys.add(10) # another form of ENTER
         self.opts = spin.default_obj
 
@@ -115,6 +113,7 @@ class Vappman:
                     '   U - update ALL installed apps',
                     '   / - filter apps',
                     '   ENTER = install, remove, or return from help',
+                    '   ESC = clear filter and jump to top',
                     'CONTEXT SENSITIVE:',
                     '   i - install uninstalled app',
                     '   r - remove installed app',
@@ -135,11 +134,11 @@ class Vappman:
                 for app, line in self.installs.items():
                     if app in self.apps:
                         line = self.apps[app]
-                    if wanted(line):
+                    if wanted(line[2:]):
                         line = '✔✔✔' + line[1:]
                         self.win.add_body(line)
                 for app, line in self.apps.items():
-                    if app not in self.installs and wanted(line):
+                    if app not in self.installs and wanted(line[2:]):
                         self.win.add_body(line)
             self.win.render()
 
@@ -149,15 +148,17 @@ class Vappman:
     def get_keys_line(self):
         """ TBD """
         # EXPAND
-        filt = self.prev_filter if self.prev_filter else '{No-Filt}'
-        line = 'KEYS:'
+        line = ''
         for key, verb in self.actions.items():
-            line += f' {key}:{verb}'
+            if key[0] == verb[0]:
+                line += f' {verb}'
+            else:
+                line += f' {key}:{verb}'
         # or EXPAND
-        line += f' ?:help q:quit a:about s:sync c:clean U:upd /{filt}  '
+        line += f' ?:help quit about sync clean Upd /{self.prev_filter}  '
         # for action in self.actions:
             # line += f' {action[0]}:{action}'
-        return line
+        return line[1:]
 
     def get_actions(self, line):
         """ Determine the type of the current line and available commands."""
@@ -185,27 +186,30 @@ class Vappman:
         """
         this = Vappman.singleton
         this.pick_app, this.actions = this.get_actions(line)
-        keys_line = this.get_keys_line().ljust(this.win.get_pad_width())
-        this.win.head.pad.addstr(0, 0, keys_line, cs.A_BOLD)
+        header = this.get_keys_line()
+        # ASSUME line ends in /....
+        parts = header.split('/', maxsplit=1)
+        wds = parts[0].split()
+        this.win.head.pad.move(0, 0)
+        for wd in wds:
+            if wd:
+                this.win.add_header(wd[0], attr=cs.A_BOLD|cs.A_UNDERLINE, resume=True)
+            if wd[1:]:
+                this.win.add_header(wd[1:] + ' ', resume=True)
 
+        this.win.add_header('/', attr=cs.A_BOLD+cs.A_UNDERLINE, resume=True)
+        if len(parts) > 1 and parts[1]:
+            this.win.add_header(f'{parts[1]}', resume=True)
+        _, col = this.win.head.pad.getyx()
+        pad = ' ' * (this.win.get_pad_width()-col)
+        this.win.add_header(pad, resume=True)
         return line
-#       #IF WE WANT TO DO SOMETHING ON THE LINE...
-#       suffix = ''
-#       for action in actions:
-#           suffix += f' {action[0]}:{action}'
-#       block_char = "\u2588"
-#       suffix = f'{block_char*5} {suffix}'
-#       over = len(line) + len(suffix) - this.win.get_pad_width()
-#       if over < 0:
-#           line += ' '*(-over)
-#       elif over > 0:
-#           line = line[0:-over]
 
-#       return line + suffix
     def run_appman(self, cmd):
+        """ Run a 'appman' command """
         Window.stop_curses()
         os.system(f'clear; stty sane; {cmd};'
-                  + ' /bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
+                  + r' /bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
         self.installs = self.get_installed()
         Window._start_curses()
 
@@ -217,7 +221,7 @@ class Vappman:
             if self.opts.help_mode:
                 self.opts.help_mode = False
                 return True
-            elif self.pick_is_installed:
+            if self.pick_is_installed:
                 key = ord('r') # removed installed app
             else:
                 key = ord('i') # install uninstalled app
@@ -226,6 +230,12 @@ class Vappman:
             value = self.spin.do_key(key, self.win)
             return value
         
+        if key == 27: # ESCAPE
+            self.prev_filter = ''
+            self.filter = None
+            self.win.pick_pos = 0
+            return None
+
         if key == ord('q'):
             self.win.stop_curses()
             os.system('clear; stty sane')
@@ -252,11 +262,12 @@ class Vappman:
         if key == ord('u'):
             self.run_appman(f'appman update {self.pick_app}')
         if key == ord('U'):
-            self.run_appman(f'appman update')
+            self.run_appman('appman update')
         # EXPAND
 
         if key == ord('/'):
             # pylint: disable=protected-access
+            start_filter = self.prev_filter
 
             prefix = ''
             while True:
@@ -266,17 +277,21 @@ class Vappman:
                 pattern.strip()
                 if not pattern:
                     self.filter = None
-                    return None
+                    break
 
                 try:
                     if re.match(r'^[\-\w\s]*$', pattern):
                         words = pattern.split()
-                        self.filter = re.compile(r'\b' + r'\b.*'.join(words), re.IGNORECASE)
-                        return None
+                        self.filter = re.compile(r'\b' + r'(|.*\b)'.join(words), re.IGNORECASE)
+                        break
                     self.filter = re.compile(pattern, re.IGNORECASE)
-                    return None
+                    break
                 except Exception:
                     prefix = 'Bad regex: '
+
+            if start_filter != self.prev_filter:
+                # when filter changes, move to top
+                self.win.pick_pos = 0
 
             return None
         return None
