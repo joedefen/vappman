@@ -6,7 +6,7 @@ Interactive, visual thin layer atop appman
 # pylint: disable=broad-exception-caught,consider-using-with
 # pylint: disable=too-many-instance-attributes,too-many-branches
 # pylint: disable=too-many-return-statements,too-many-statements
-# pylint: disable=consider-using-in
+# pylint: disable=consider-using-in,too-many-nested-blocks
 # pylint: disable=wrong-import-position,disable=wrong-import-order
 # import VirtEnv
 # VirtEnv.ensure_venv(__name__)
@@ -14,6 +14,7 @@ Interactive, visual thin layer atop appman
 import os
 import sys
 import re
+import glob
 import shutil
 import subprocess
 import traceback
@@ -34,7 +35,7 @@ class Vappman:
         spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
 
         # EXPAND
-        other = 'airbou/qscU'
+        other = 'airtbou/qxscU'
         other_keys = set(ord(x) for x in other)
         other_keys.add(cs.KEY_ENTER)
         other_keys.add(27) # ESCAPE
@@ -49,6 +50,9 @@ class Vappman:
         self.check_preqreqs()
         self.apps = self.cmd_dict('appman list')
         self.installs = self.get_installed() # dict keyed by app
+        self.appman_dir = self.get_appman_dir()
+        self.dot_desktop_dir = self.get_dot_desktop_dir()
+        self.terminal_emulator = None
         self.win = Window(head_line=True, body_rows=len(self.apps)+20, head_rows=10,
                           keys=spin.keys ^ other_keys, mod_pick=self.mod_pick)
 
@@ -94,6 +98,43 @@ class Vappman:
         rv = self.cmd_dict('appman files --byname')
         return rv
 
+    @staticmethod
+    def get_appman_dir():
+        """ Try to figure out where the apps are stored. """
+
+        appman_dir = None, None
+        try:
+            config_dir = os.getenv('XDG_CONFIG_HOME')
+            if not config_dir:
+                config_dir = os.path.join(os.getenv('HOME'), '.config')
+            config_file = os.path.join(config_dir, 'appman', 'appman-config')
+            with open(config_file, 'r', encoding='utf-8') as fh:
+                appman_dir = fh.read().strip()
+            appman_dir = os.path.join(os.getenv('HOME'), appman_dir)
+            os.listdir(appman_dir)
+            return appman_dir
+        except Exception as exc:
+            print(f'NOTE: cannot get appman dir; tried below {appman_dir!r}; {exc}')
+            print('    Check if contents of ~/config/appman/appman-config'
+                  + ' is the subdir of $HOME w your appman apps')
+            return None
+
+    @staticmethod
+    def get_dot_desktop_dir():
+        """ Try to figure out where the .desktop files are stored. """
+
+        try:
+            data_dir = os.getenv('XDG_DATA_HOME')
+            if not data_dir:
+                data_dir = os.path.join(os.getenv('HOME'), '.local', 'share')
+            dot_dir = os.path.join(data_dir, 'applications')
+            os.listdir(dot_dir)
+            return dot_dir
+        except Exception as exc:
+            print(f'NOTE: cannot get .desktop dir; tried below {data_dir!r}; {exc}')
+            print('    Check if contents of ~/.local/share/applications for .desktop files')
+            return None
+
     def main_loop(self):
         """ TBD """
 
@@ -106,7 +147,7 @@ class Vappman:
                 # EXPAND
                 lines = [
                     'ALWAYS AVAILABLE:',
-                    '   q - quit program (CTL-C disabled)',
+                    '   q or x - quit program (CTL-C disabled)',
                     '   a - about (more info about app)',
                     '   s - sync (update appman itself)',
                     '   c - clean (remove unneeded files/folters)',
@@ -119,6 +160,7 @@ class Vappman:
                     '   r - remove installed app',
                     '   b - backup installed app',
                     '   u - update installed app',
+                    '   t - test by opening a terminal emulator and launching the app'
                     '   o - overwrite app from its backup',
 
                 ]
@@ -127,6 +169,12 @@ class Vappman:
             else:
                 def wanted(line):
                     return not self.filter or self.filter.search(line)
+                def version_of(app):
+                    # ◆  krita      |  5.2.2   |  appimage-type2  |  355   MiB
+                    fields = self.installs[app].split('|')
+                    if len(fields) >= 2:
+                        return fields[1].strip()
+                    return '?version?'
 
                 # self.win.set_pick_mode(self.opts.pick_mode, self.opts.pick_size)
                 self.win.set_pick_mode(True)
@@ -135,7 +183,7 @@ class Vappman:
                     if app in self.apps:
                         line = self.apps[app]
                     if wanted(line[2:]):
-                        line = '✔✔✔' + line[1:]
+                        line = f'✔✔✔ {app} [{version_of(app)}] :{line.split(':', maxsplit=1)[1]}'
                         self.win.add_body(line)
                 for app, line in self.apps.items():
                     if app not in self.installs and wanted(line[2:]):
@@ -174,6 +222,7 @@ class Vappman:
                 actions['b'] = 'bkup'
                 actions['o'] = 'overwr'
                 actions['u'] = 'upd'
+                actions['t'] = 'test'
             else:
                 actions['i'] = 'install'
 
@@ -213,6 +262,95 @@ class Vappman:
         self.installs = self.get_installed()
         Window._start_curses()
 
+    @staticmethod
+    def launch_desktop_file(desktop_file_path):
+        """ Launch the .desktop file using xdg-open in a detached process """
+        try:
+            trial = ['xdg-open', desktop_file_path]
+            subprocess.Popen(trial,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+            return None
+        except Exception:
+            return trial
+
+    def launch_in_terminal(self, executable):
+        """ Find a terminal emulator"""
+        if not self.terminal_emulator:
+            maybes = [
+                [ 'konsole', '--noclose', '-e', '"{command}"'],
+                [ 'gnome-terminal', '--', 'bash', '-c', '"{command}"; exec bash' ],
+                [ 'xfce4-terminal', '--hold', '--command="{command}"' ],
+                [ 'lxterminal', '-e', """bash -c '"{command}"; echo; read -p "Press Enter to close..."'"""],
+                # [ terminator', ],
+                # [ alacritty', ],
+                # [ termite', ],
+                # [ urxvt', ],
+                # [ sakura', ],
+                # [ tilix', ],
+                # [ kitty', ],
+                # [ hyper', ],
+                # [ guake', ],
+                # [ yakuake', ],
+            ]
+            for maybe in maybes:
+                if shutil.which(maybe[0]):
+                    self.terminal_emulator = maybe
+                    break
+        if self.terminal_emulator:
+            try:
+                trial = []
+                for wd in self.terminal_emulator:
+                    trial.append(wd.replace('{command}', executable))
+                subprocess.Popen(trial)
+                return None
+            except Exception:
+                return trial
+        return trial
+
+    def launch_app(self, app):
+        """ Try to run an app."""
+        # First dig out where it might be installed as a .desktop file
+        # by searching the 'remove' script
+        def get_unique_words_from_file(file_path):
+            seen_words = set()
+            with open(file_path, 'r', encoding='utf-8') as file:
+                for line in file:
+                    line_words = line.split()
+                    for word in line_words:
+                        if word not in seen_words:
+                            seen_words.add(word)
+            return seen_words
+
+        failures = []
+        executables = []
+        try:
+            for globname in get_unique_words_from_file(
+                    os.path.join(self.appman_dir, app, 'remove')):
+                results = glob.glob(globname)
+                if '/share/applications/AM-ZZZ' in globname:
+                    for result in results:
+                        if result.endswith('.desktop'):
+                            failure = self.launch_desktop_file(result)
+                            if failure:
+                                failures.append(' '.join(failure))
+                            return
+                elif '/.local/bin/' in globname:
+                    for result in results:
+                        if os.access(result, os.X_OK):
+                            executables.append(result)
+            for executable in executables:
+                failure = self.launch_in_terminal(executable)
+                if failure:
+                    failures.append(' '.join(failure))
+                return
+        except Exception as exc:
+            failures += f'cannot find .desktop/executable to run [{exc}]'
+        if failures:
+            message = ' '.join([f'Cannot launch {app}'] + failures)
+            self.win.alert(message=message)
+
+        self.launch_app(self.pick_app)
+
     def do_key(self, key):
         """ TBD """
         if not key:
@@ -222,21 +360,21 @@ class Vappman:
                 self.opts.help_mode = False
                 return True
             if self.pick_is_installed:
-                key = ord('r') # removed installed app
+                key = ord('r') # remove installed app
             else:
                 key = ord('i') # install uninstalled app
 
         if key in self.spin.keys:
             value = self.spin.do_key(key, self.win)
             return value
-        
+
         if key == 27: # ESCAPE
             self.prev_filter = ''
             self.filter = None
             self.win.pick_pos = 0
             return None
 
-        if key == ord('q'):
+        if key in (ord('q'), ord('x')):
             self.win.stop_curses()
             os.system('clear; stty sane')
             sys.exit(0)
@@ -247,6 +385,10 @@ class Vappman:
 
         if key == ord('r') and self.pick_is_installed:
             self.run_appman(f'appman remove {self.pick_app}')
+            return None
+
+        if key == ord('t') and self.pick_is_installed:
+            self.launch_app(self.pick_app)
             return None
 
         if key == ord('s'):

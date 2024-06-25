@@ -588,7 +588,7 @@ class Window:
     def alert(self, title='ALERT', message='', height=1, width=80):
         """Alert box"""
         def mod_key(key):
-            return  7 if key == 10 else key
+            return  7 if key in (10, curses.KEY_ENTER) else key
 
         # need 3 extra cols for rectangle (so we don't draw in southeast corner)
         # and 3 rows (top/prompt/bottom)
