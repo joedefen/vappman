@@ -147,21 +147,21 @@ class Vappman:
                 # EXPAND
                 lines = [
                     'ALWAYS AVAILABLE:',
-                    '   q or x - quit program (CTL-C disabled)',
                     '   a - about (more info about app)',
                     '   s - sync (update appman itself)',
                     '   c - clean (remove unneeded files/folters)',
                     '   U - update ALL installed apps',
-                    '   / - filter apps',
-                    '   ENTER = install, remove, or return from help',
+                    '   q or x - quit program (CTL-C disabled)',
+                    '   / - filter apps by keywords or regex',
                     '   ESC = clear filter and jump to top',
+                    '   ENTER = install, remove, or return from help',
                     'CONTEXT SENSITIVE:',
                     '   i - install uninstalled app',
                     '   r - remove installed app',
-                    '   b - backup installed app',
                     '   u - update installed app',
-                    '   t - test by opening a terminal emulator and launching the app'
+                    '   b - backup installed app',
                     '   o - overwrite app from its backup',
+                    '   t - test by opening a terminal emulator and launching the app',
 
                 ]
                 for line in lines:
@@ -203,7 +203,7 @@ class Vappman:
             else:
                 line += f' {key}:{verb}'
         # or EXPAND
-        line += f' ?:help quit about sync clean Upd /{self.prev_filter}  '
+        line += f' about ❚ sync clean Upd quit ?:help /{self.prev_filter}  '
         # for action in self.actions:
             # line += f' {action[0]}:{action}'
         return line[1:]
@@ -219,9 +219,9 @@ class Vappman:
             # EXPAND
             if self.pick_is_installed:
                 actions['r'] = 'rmv'
+                actions['u'] = 'upd'
                 actions['b'] = 'bkup'
                 actions['o'] = 'overwr'
-                actions['u'] = 'upd'
                 actions['t'] = 'test'
             else:
                 actions['i'] = 'install'
@@ -241,6 +241,9 @@ class Vappman:
         wds = parts[0].split()
         this.win.head.pad.move(0, 0)
         for wd in wds:
+            if wd[0]in ('<', '|', '❚'):
+                this.win.add_header(wd + ' ', resume=True)
+                continue
             if wd:
                 this.win.add_header(wd[0], attr=cs.A_BOLD|cs.A_UNDERLINE, resume=True)
             if wd[1:]:

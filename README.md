@@ -57,6 +57,7 @@ But it does NOT cover:
 ---
 
 NOTES: in this example:
+* keys to the left of `❚` apply to the highlighted app; keys to the right apply globally.
 * the filter is `card` so it shows app lines with words starting with `card`.
 * the reverse video, current position is on `glabels`;
   thus if `i` (or ENTER) is typed, `appman install glabels` is run.
@@ -64,7 +65,7 @@ NOTES: in this example:
   all the filtered apps; otherwise, the decoration suggests where you are in the
   partial view of the filtered apps.
 * the matching installed app has the '✔✔✔' prefix.
-* the fixed top line shows some of the available action keys (e.g., `q` quits the app)
+* the fixed top line shows mos of the available action keys (e.g., `q` quits the app)
 * use `?` to open the help screen describing all keys (including navigation)
 
 ## Screen Recording (Intro to vappman based on v0.7)
