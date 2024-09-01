@@ -91,12 +91,24 @@ class Vappman:
         lines = result.stdout.splitlines()
         ansi_escape_pattern = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
         rv = {}
+        prev_wd1 = None
         for line in lines:
-            line = ansi_escape_pattern.sub('', line).strip() # get clean text
+            line = ansi_escape_pattern.sub('', line) # get clean text
             if re.match(start, line):
+                line = line.strip()
                 wd1 = self.get_word1(line)
                 if wd1:
                     rv[wd1] = line
+                    prev_wd1 = wd1
+            elif prev_wd1 and line.startswith(' '):
+                line = line.strip()
+                if line:
+                    rv[prev_wd1] += ' ' + line
+                else:
+                    prev_wd1 = None
+            else:
+                prev_wd1 = None
+
         return rv
 
     @staticmethod
