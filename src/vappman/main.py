@@ -72,16 +72,28 @@ class Vappman:
         if not ok:
             sys.exit(1)
 
-    def cmd_dict(self, cmd, start='◆ '):
-        """ Get lines with the given start."""
+    def cmd_dict(self, cmd, start=r'\s*◆\s'):
+        """ Get lines with the given start put into a dict keyed by the
+            1st word.
+        """
         # Define the command to run
         command = cmd.split()
         # Run the command and capture the output
-        result = subprocess.run(command, stdout=subprocess.PIPE, text=True, check=True)
+        try:
+            result = subprocess.run(command, stdout=subprocess.PIPE, text=True, check=False)
+        except Exception as exc:
+            Window.stop_curses()
+            print(f'FAILED: {command}: {exc}')
+            sys.exit(1)
+
+        if result.returncode != 0:
+            print(f'WARNING: {command}: {result.returncode=}')
         lines = result.stdout.splitlines()
+        ansi_escape_pattern = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
         rv = {}
         for line in lines:
-            if line.startswith(start):
+            line = ansi_escape_pattern.sub('', line).strip() # get clean text
+            if re.match(start, line):
                 wd1 = self.get_word1(line)
                 if wd1:
                     rv[wd1] = line

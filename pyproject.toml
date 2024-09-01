@@ -55,7 +55,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vappman"
-version = "0.9"
+version = "0.9.1"
 description = "A visual wrapper for appman"
 authors = [
     { name = "Joe Defen", email = "joedef@google.com" }
