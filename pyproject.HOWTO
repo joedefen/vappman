@@ -1,0 +1,38 @@
+# Vappman HOWTO Develop
+
+A visual wrapper for appman.
+
+---
+
+## How to Develop
+
+### Prep Work
+Ensure necessary modules are up-to-date:
+- `sudo apt install python3-pip`
+- `sudo apt install python3-pip-whl`
+- `pip install build --break-system-packages`
+- `sudo apt install twine`
+
+Optionally, use a virtual environment:
+- `python3 -m venv venv`
+- `source venv/bin/activate` (to activate)
+- `deactivate` (to deactivate)
+
+### Running the Project
+- To run with local changes: `rm -rf ./dist && python3 -m build && pip install -e . --break-system-packages`
+- Or simply: `python3 -m vappman.main`
+- Or from the source directory: `cd src/vappman && ./main.py`
+
+---
+
+## How to Publish
+
+### Public Build and Deploy
+- **BUMP** the version in `pyproject.toml`.
+flit build && flit publish  # Will prompt for your PyPI token if not cached
+- Install or upgrade: `pipx upgrade vappman` (for Python 3.11+) or `sudo python3 -m pip install vappman` (for Python 3.10 and below).
+
+### Test Build and Deploy
+- **BUMP** the version in `pyproject.toml`.
+flit build && flit publish --repository testpypi
++ Install from TestPyPI: `sudo python3 -m pip install --upgrade --index-url https://test.pypi.org/simple/ --no-deps --break-system-packages vappman`

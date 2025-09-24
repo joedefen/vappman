@@ -80,7 +80,8 @@ class Vappman:
         command = cmd.split()
         # Run the command and capture the output
         try:
-            result = subprocess.run(command, stdout=subprocess.PIPE, text=True, check=False)
+            result = subprocess.run(command, stdout=subprocess.PIPE,
+                    text=True, encoding='utf-8', errors='ignore', check=False)
         except Exception as exc:
             Window.stop_curses()
             print(f'FAILED: {command}: {exc}')
