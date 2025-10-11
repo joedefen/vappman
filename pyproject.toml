@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "vappman"
-version = "0.9.4"
+version = "0.9.5"
 description = "A visual wrapper for appman"
 authors = [
     { name = "Joe Defen", email = "joedef@google.com" }

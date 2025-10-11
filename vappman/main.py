@@ -285,8 +285,8 @@ class Vappman:
     def run_appman(self, cmd):
         """ Run a 'appman' command """
         Window.stop_curses()
-        os.system(f'clear; stty sane; {cmd};'
-                  + r' /bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
+        os.system(f'clear; stty sane; /bin/echo + {cmd}; {cmd};'
+                  + r' /bin/echo -e "\n\n===== Press ENTER to return to vappman ====> \c"; read FOO')
         self.installs = self.get_installed()
         Window._start_curses()
 
@@ -309,16 +309,14 @@ class Vappman:
                 [ 'gnome-terminal', '--', 'bash', '-c', '"{command}"; exec bash' ],
                 [ 'xfce4-terminal', '--hold', '--command="{command}"' ],
                 [ 'lxterminal', '-e', """bash -c '"{command}"; echo; read -p "Press Enter to close..."'"""],
-                # [ terminator', ],
-                # [ alacritty', ],
-                # [ termite', ],
-                # [ urxvt', ],
-                # [ sakura', ],
-                # [ tilix', ],
-                # [ kitty', ],
-                # [ hyper', ],
-                # [ guake', ],
-                # [ yakuake', ],
+                [ 'alacritty', '--hold', '-e', 'sh', '-c', '"{command}"' ],
+                [ 'guake', '--new-tab', '--execute-command="sh -c \'{command} ; exec $SHELL\'"' ],
+                [ 'tilix', '-e', 'sh -c "{command} ; exec $SHELL"' ],
+                [ 'sakura', '-x', 'sh -c "{command} ; bash"' ],
+                [ 'terminator', '-e', 'bash -c " {command} ; bash "' ],
+                [ 'kitty', '--hold', '/bin/sh', '-c', '"{command}"' ],
+                # [ hyper', ], # cannot be supported
+                # [ yakuake', ], # cannot be supported
             ]
             for maybe in maybes:
                 if shutil.which(maybe[0]):
