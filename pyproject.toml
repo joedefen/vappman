@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "vappman"
-version = "0.9.5"
+version = "0.9.6"
 description = "A visual wrapper for appman"
 authors = [
     { name = "Joe Defen", email = "joedef@google.com" }
@@ -18,8 +18,9 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux"
 ]
-dependencies = [
+requires = [
     'importlib-metadata; python_version<"3.8"',
+    'console-window >= 1.0.0',
 ]
 
 [project.urls]

@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import traceback
 import curses as cs
-from vappman.PowerWindow import Window, OptionSpinner
+from console_window import ConsoleWindow, OptionSpinner
 
 
 class Vappman:
@@ -53,7 +53,7 @@ class Vappman:
         self.appman_dir = self.get_appman_dir()
         self.dot_desktop_dir = self.get_dot_desktop_dir()
         self.terminal_emulator = None
-        self.win = Window(head_line=True, body_rows=len(self.apps)+20, head_rows=10,
+        self.win = ConsoleWindow(head_line=True, body_rows=len(self.apps)+20, head_rows=10,
                           keys=spin.keys ^ other_keys, mod_pick=self.mod_pick)
 
     @staticmethod
@@ -83,7 +83,7 @@ class Vappman:
             result = subprocess.run(command, stdout=subprocess.PIPE,
                     text=True, encoding='utf-8', errors='ignore', check=False)
         except Exception as exc:
-            Window.stop_curses()
+            ConsoleWindow.stop_curses()
             print(f'FAILED: {command}: {exc}')
             sys.exit(1)
 
@@ -284,11 +284,11 @@ class Vappman:
 
     def run_appman(self, cmd):
         """ Run a 'appman' command """
-        Window.stop_curses()
-        os.system(f'clear; stty sane; /bin/echo + {cmd}; {cmd};'
+        ConsoleWindow.stop_curses()
+        os.system(f'clear; stty sane; {cmd};'
                   + r' /bin/echo -e "\n\n===== Press ENTER to return to vappman ====> \c"; read FOO')
         self.installs = self.get_installed()
-        Window._start_curses()
+        ConsoleWindow._start_curses()
 
     @staticmethod
     def launch_desktop_file(desktop_file_path):
@@ -478,7 +478,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         pass
     except Exception as exce:
-        Window.stop_curses()
+        ConsoleWindow.stop_curses()
         print("exception:", str(exce))
         print(traceback.format_exc())
 #       if dump_str:
