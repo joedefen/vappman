@@ -80,8 +80,9 @@ class Vappman:
         command = cmd.split()
         # Run the command and capture the output
         try:
+            # Capture as bytes first, then decode with error handling
             result = subprocess.run(command, stdout=subprocess.PIPE,
-                    text=True, encoding='utf-8', errors='ignore', check=False)
+                    stderr=subprocess.PIPE, check=False)
         except Exception as exc:
             ConsoleWindow.stop_curses()
             print(f'FAILED: {command}: {exc}')
@@ -89,7 +90,17 @@ class Vappman:
 
         if result.returncode != 0:
             print(f'WARNING: {command}: {result.returncode=}')
-        lines = result.stdout.splitlines()
+
+        # Decode with multiple fallback strategies
+        try:
+            output = result.stdout.decode('utf-8', errors='replace')
+        except Exception:
+            try:
+                output = result.stdout.decode('latin-1', errors='replace')
+            except Exception:
+                output = str(result.stdout, errors='replace')
+
+        lines = output.splitlines()
         ansi_escape_pattern = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
         rv = {}
         prev_wd1 = None
