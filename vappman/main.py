@@ -16,6 +16,7 @@ import sys
 import re
 import glob
 import shutil
+import shlex
 import subprocess
 import traceback
 import curses as cs
@@ -144,7 +145,7 @@ class Vappman:
             if not config_dir:
                 config_dir = os.path.join(os.getenv('HOME'), '.config')
             config_file = os.path.join(config_dir, 'appman', 'appman-config')
-            with open(config_file, 'r', encoding='utf-8') as fh:
+            with open(config_file, 'r', encoding='utf-8', errors='replace') as fh:
                 appman_dir = fh.read().strip()
             appman_dir = os.path.join(os.getenv('HOME'), appman_dir)
             os.listdir(appman_dir)
@@ -296,7 +297,7 @@ class Vappman:
     def run_appman(self, cmd):
         """ Run a 'appman' command """
         ConsoleWindow.stop_curses()
-        os.system(f'clear; stty sane; {cmd};'
+        os.system(f'clear; stty sane; {shlex.quote(cmd)};'
                   + r' /bin/echo -e "\n\n===== Press ENTER to return to vappman ====> \c"; read FOO')
         self.installs = self.get_installed()
         ConsoleWindow._start_curses()
@@ -350,7 +351,7 @@ class Vappman:
         # by searching the 'remove' script
         def get_unique_words_from_file(file_path):
             seen_words = set()
-            with open(file_path, 'r', encoding='utf-8') as file:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as file:
                 for line in file:
                     line_words = line.split()
                     for word in line_words:

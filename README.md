@@ -1,6 +1,9 @@
 # vappman
 `vappman` presents a visual (curses) interface to `appman`.
 
+Why use `vappman`? Browse 1900+ apps interactively with mouse/keyboard, filter by keywords or regex to rapidly find apps, and see installed vs. available at a glance. No CLI option memorization required because context-sensitive keys guide you through the life cycle of your AppImages including installing, updating, and removing.
+
+
 * Install `vappman` using `pipx install vappman`, or however you do so.
 * Prerequisites: install [ivan-hc/AppMan: AppImage package manager to install, update (for real) and manage ALL of them locally thanks to "AM", the ever-growing AUR-inspired database listing (for now) 1900+ portable apps and programs for GNU/Linux. Manage your AppImages with the ease of APT and the power of PacMan.](https://github.com/ivan-hc/AppMan) and all of its prerequisites.
 
@@ -48,9 +51,10 @@ But it does NOT cover:
     * NOTES:
       * `ESC` clears the filter and jumps to the top of the listing.
       * Each time the filter is changed, the position jumps to the top of the listing.
-* Use `i` to install apps, and `r` to remove apps.  When you install or remove an app, `appman` drops out of `curses` mode, runs the `appman` command so you can see the result, and then prompts your to hit ENTER to return to `vappman.
+* Use `i` to install apps, and `r` to remove apps.  When you install or remove an app, `appman` drops out of `curses` mode, runs the `appman` command so you can see the result, and then prompts you to hit ENTER to return to `vappman`.
+* Use `s` to sync (update appman itself).
 * Use `t` to "test" an installed app.  This launches a terminal emulator and then the app so you can see issues. This is not for daily use obviously, but for after install or when having unknown issues and you wish to start the investigation.
-  * You must have one of these terminial emulators (and they are searched for in order): konsole, gnome-terminal, xfce4-terminal, lxterminal, alacritty, guake, tilix, sakura, terminator, or kitty.
+  * You must have one of these terminal emulators (and they are searched for in order): konsole, gnome-terminal, xfce4-terminal, lxterminal, alacritty, guake, tilix, sakura, terminator, or kitty.
 
 ## Example Screenshot (of v0.9 ... current release will vary slightly)
 ![vappman-with-filter](https://github.com/joedefen/vappman/blob/main/images/vappman-with-filter.png?raw=true).
