@@ -8,8 +8,7 @@ Interactive, visual thin layer atop appman
 # pylint: disable=too-many-return-statements,too-many-statements
 # pylint: disable=consider-using-in,too-many-nested-blocks
 # pylint: disable=wrong-import-position,disable=wrong-import-order
-# import VirtEnv
-# VirtEnv.ensure_venv(__name__)
+# pylint: disable=line-too-long,protected-access
 
 import os
 import sys
@@ -294,11 +293,49 @@ class Vappman:
         this.win.add_header(pad, resume=True)
         return line
 
-    def run_appman(self, cmd):
+    def old_run_appman(self, cmd):
         """ Run a 'appman' command """
         ConsoleWindow.stop_curses()
-        os.system(f'clear; stty sane; {shlex.quote(cmd)};'
+        os.system(f'clear; stty sane; /bin/echo + {shlex.quote(cmd)}; {shlex.quote(cmd)};'
                   + r' /bin/echo -e "\n\n===== Press ENTER to return to vappman ====> \c"; read FOO')
+        self.installs = self.get_installed()
+        ConsoleWindow._start_curses()
+
+    def run_appman(self, subcommand: str, app: str = None):
+        """ Run an 'appman' command using subprocess. """
+
+        # 1. Build the command list
+        cmd = ['appman', subcommand]
+        if app:
+            cmd.append(app)
+
+        # 2. Stop curses environment
+        ConsoleWindow.stop_curses()
+
+        # 3. Print the command being executed for user confirmation/debugging
+        # Using ' '.join(shlex.quote(arg) for arg in cmd_list) ensures the printed command is safely quotable
+        # in case any arg has spaces, though it won't affect the execution below.
+        cmd_str = f'+ appman {subcommand}' + (f'{shlex.quote(app)}' if app else '')
+        print(cmd_str)
+
+        try:
+            # 4. Execute the command
+            # run() is generally preferred over call() or Popen() for simple execution
+            # check=True raises CalledProcessError if the command returns a non-zero exit code
+            # We don't use 'shell=True' here, which is safer and avoids shell quoting issues
+            subprocess.run(cmd, check=True)
+
+        except subprocess.CalledProcessError as e:
+            # Handle errors if the command fails
+            print(f"ERROR: failed {cmd_str!r} :: {e}")
+        except FileNotFoundError:
+            # Handle case where 'appman' executable isn't found
+            print("ERROR: 'appman' command not found. Ensure it is in your PATH.")
+
+        # 5. Wait for user input to return (similar to your original 'read FOO')
+        input('\n\n===== Press ENTER to return to vappman ====> ')
+
+        # 6. Update installs and restart curses environment
         self.installs = self.get_installed()
         ConsoleWindow._start_curses()
 
@@ -418,11 +455,11 @@ class Vappman:
             sys.exit(0)
 
         if key == ord('i') and not self.pick_is_installed:
-            self.run_appman(f'appman install {self.pick_app}')
+            self.run_appman('install', self.pick_app)
             return None
 
         if key == ord('r') and self.pick_is_installed:
-            self.run_appman(f'appman remove {self.pick_app}')
+            self.run_appman('remove', self.pick_app)
             return None
 
         if key == ord('t') and self.pick_is_installed:
@@ -430,19 +467,19 @@ class Vappman:
             return None
 
         if key == ord('s'):
-            self.run_appman('appman sync')
+            self.run_appman('sync')
         if key == ord('c'):
-            self.run_appman('appman clean')
+            self.run_appman('clean')
         if key == ord('b'):
-            self.run_appman(f'appman backup {self.pick_app}')
+            self.run_appman('backup', self.pick_app)
         if key == ord('o'):
-            self.run_appman(f'appman overwrite {self.pick_app}')
+            self.run_appman('overwrite', self.pick_app)
         if key == ord('a'):
-            self.run_appman(f'appman about {self.pick_app}')
+            self.run_appman('about', self.pick_app)
         if key == ord('u'):
-            self.run_appman(f'appman update {self.pick_app}')
+            self.run_appman('update', self.pick_app)
         if key == ord('U'):
-            self.run_appman('appman update')
+            self.run_appman('update')
         # EXPAND
 
         if key == ord('/'):
