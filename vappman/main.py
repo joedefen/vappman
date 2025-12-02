@@ -125,9 +125,9 @@ class Vappman:
 
     @staticmethod
     def get_word1(line):
-        """ Get words[1] from a string. """
+        """ Get words[1] from a string (e.g. '◆  appname ...' -> 'appname'). """
         words = line.split(maxsplit=3)
-        return '' if len(words) < 1 else words[1]
+        return '' if len(words) < 2 else words[1]
 
     def get_installed(self):
         """ Get the list of lines of installed apps """
@@ -138,7 +138,7 @@ class Vappman:
     def get_appman_dir():
         """ Try to figure out where the apps are stored. """
 
-        appman_dir = None, None
+        appman_dir = None
         try:
             config_dir = os.getenv('XDG_CONFIG_HOME')
             if not config_dir:
@@ -146,7 +146,10 @@ class Vappman:
             config_file = os.path.join(config_dir, 'appman', 'appman-config')
             with open(config_file, 'r', encoding='utf-8', errors='replace') as fh:
                 appman_dir = fh.read().strip()
-            appman_dir = os.path.join(os.getenv('HOME'), appman_dir)
+            # appman-config may contain either an absolute path or a home-relative path;
+            # use as-is if absolute, otherwise join to HOME.
+            if not os.path.isabs(appman_dir):
+                appman_dir = os.path.join(os.getenv('HOME'), appman_dir)
             os.listdir(appman_dir)
             return appman_dir
         except Exception as exc:
@@ -311,11 +314,12 @@ class Vappman:
 
         # 2. Stop curses environment
         ConsoleWindow.stop_curses()
+        os.system('clear; stty sane')
 
         # 3. Print the command being executed for user confirmation/debugging
         # Using ' '.join(shlex.quote(arg) for arg in cmd_list) ensures the printed command is safely quotable
         # in case any arg has spaces, though it won't affect the execution below.
-        cmd_str = f'+ appman {subcommand}' + (f'{shlex.quote(app)}' if app else '')
+        cmd_str = '+ ' + ' '.join(shlex.quote(p) for p in cmd)
         print(cmd_str)
 
         try:
@@ -371,16 +375,19 @@ class Vappman:
                 if shutil.which(maybe[0]):
                     self.terminal_emulator = maybe
                     break
+        # On success return None; on failure return the attempted argument list
+        if not self.terminal_emulator:
+            return None
+        trial = []
         if self.terminal_emulator:
             try:
-                trial = []
                 for wd in self.terminal_emulator:
                     trial.append(wd.replace('{command}', executable))
                 subprocess.Popen(trial)
                 return None
             except Exception:
                 return trial
-        return trial
+        return None
 
     def launch_app(self, app):
         """ Try to run an app."""
@@ -516,19 +523,15 @@ class Vappman:
 
 def main():
     """ The program """
-
-    appman = Vappman()
-    appman.main_loop()
-
-if __name__ == '__main__':
-
     try:
-        main()
+        appman = Vappman()
+        appman.main_loop()
     except KeyboardInterrupt:
         pass
     except Exception as exce:
         ConsoleWindow.stop_curses()
         print("exception:", str(exce))
         print(traceback.format_exc())
-#       if dump_str:
-#           print(dump_str)
+
+if __name__ == '__main__':
+    main()
