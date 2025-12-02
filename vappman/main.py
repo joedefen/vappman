@@ -35,7 +35,7 @@ class Vappman:
         spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
 
         # EXPAND
-        other = 'airtbou/qxscU'
+        other = 'airtbou/qxscUR'
         other_keys = set(ord(x) for x in other)
         other_keys.add(cs.KEY_ENTER)
         other_keys.add(27) # ESCAPE
@@ -190,6 +190,7 @@ class Vappman:
                     '   s - sync (update appman itself)',
                     '   c - clean (remove unneeded files/folters)',
                     '   U - update ALL installed apps',
+                    '   R - reinstall ALL apps w updated install script',
                     '   q or x - quit program (CTL-C disabled)',
                     '   / - filter apps by keywords or regex',
                     '   ESC = clear filter and jump to top',
@@ -242,7 +243,7 @@ class Vappman:
             else:
                 line += f' {key}:{verb}'
         # or EXPAND
-        line += f' about ❚ sync clean Upd quit ?:help /{self.prev_filter}  '
+        line += f' about ❚ sync clean Upd ReInst quit ?:help /{self.prev_filter}  '
         # for action in self.actions:
             # line += f' {action[0]}:{action}'
         return line[1:]
@@ -487,6 +488,8 @@ class Vappman:
             self.run_appman('update', self.pick_app)
         if key == ord('U'):
             self.run_appman('update')
+        if key == ord('R'):
+            self.run_appman('reinstall')
         # EXPAND
 
         if key == ord('/'):

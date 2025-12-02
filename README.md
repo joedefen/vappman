@@ -1,22 +1,22 @@
 # vappman
 `vappman` presents a visual (curses) interface to `appman`.
 
-Why use `vappman`? Browse 1900+ apps interactively with mouse/keyboard, filter by keywords or regex to rapidly find apps, and see installed vs. available at a glance. No CLI option memorization required because context-sensitive keys guide you through the life cycle of your AppImages including installing, updating, and removing.
+Why use `vappman`? Browse 2000+ apps interactively with mouse/keyboard, filter by keywords or regex to rapidly find apps, and see installed vs. available at a glance. CLI option memorization is not required because context-sensitive keys guide you through the life cycle of your AppImages including installing, updating, and removing.
 
 
 * Install `vappman` using `pipx install vappman`, or however you do so.
-* Prerequisites: install [ivan-hc/AppMan: AppImage package manager to install, update (for real) and manage ALL of them locally thanks to "AM", the ever-growing AUR-inspired database listing (for now) 1900+ portable apps and programs for GNU/Linux. Manage your AppImages with the ease of APT and the power of PacMan.](https://github.com/ivan-hc/AppMan) and all of its prerequisites.
+* Prerequisites: install [ivan-hc/AppMan: AppImage package manager to install, update (for real) and manage ALL of them](https://github.com/ivan-hc/AppMan) and all of its prerequisites.
 
 NOTE: `vappman` covers many capabilities of appman:
-* implicitly, (-f) files (or show installed), (-l) list available apps,
-  and (-q) search the app list
+* implicitly, (-f) files (or show installed), (-l) list available apps, and (-q) search the app list
 * (-i) installing uninstalled apps
 * (-r) removing installed apps
 * (-b) backup / (-o) overwrite of installed apps
 * (-a) about (i.e., more info) for all apps
 * (-c) clean to remove unneeded files and directories
-* (-u) update installed apps; and `vappman` uses "U" for update
-       all installed apps
+* (-u) update installed apps; and `vappman` offers:
+  *  `U` to update all installed apps
+  *  `R` to reinstall all apps with altered install scripts since last install
 
 But it does NOT cover:
 * (-d) download install script
@@ -24,14 +24,12 @@ But it does NOT cover:
 * (-H) home or set $HOME directory for apps
 * (-t) template for custom install template
 * (-v) version of appman
-* --force-latest to get the most recent stable release AND
-  all other options and unmentioned commands.
+* --force-latest to get the most recent stable release AND all other options and unmentioned commands.
   
 ## Usage
 * Run `vappman` from the command line.
 * It presents some keys available on the top line.
-    * Use '?' to learn the navigation keys (e.g., you can use the mouse wheel,
-      arrow keys, and many `vi`-like keys)
+    * Use '?' to learn the navigation keys (e.g., you can use the mouse wheel, arrow keys, and many `vi`-like keys)
     * '?' also elaborates the meaning of the available keys for operations.
     * NOTE: `ENTER` acts differently based on context:
       * In help, it returns to the main menu.
@@ -43,8 +41,7 @@ But it does NOT cover:
 * Enter `/` to enter a "filter" for installed/uninstalled apps, if you wish.
     * If you enter plain ole "words", then those words must match:
       * the start of words on the apps line (in order, but not contiguously) and/or
-      * the start of the remainder of the previous word match
-        (i.e., `/bit fight` matches `bitfighter`).
+      * the start of the remainder of the previous word match (i.e., `/bit fight` matches `bitfighter`).
     * Or you can enter an regular expression acceptable to python; e.g.,
       * `^` matches the line starting with the app name
       * `\b` matches a word boundary; and so forth.
