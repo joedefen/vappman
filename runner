@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+# runner.py
+# Located in the top-level <svr vappman> directory
+
+import runpy
+import sys
+
+# Ensure the package's top directory is on the path so 'vappman' can be found.
+# This is usually necessary for debuggers to work correctly.
+# sys.path.insert(0, '.')
+
+# Execute the main module of your package.
+# This mimics the behavior of the 'python -m vappman.vappman' command.
+# This assumes your main execution logic (main() function) is in vappman/vappman.py
+if __name__ == '__main__':
+    # You pass the full module path: 'package_name.module_name'
+    sys.argv[0] = 'vappman' # This makes sys.argv look like the real command execution
+    runpy.run_module('vappman.main', run_name='__main__', alter_sys=True)

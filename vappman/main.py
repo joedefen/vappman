@@ -2,6 +2,166 @@
 # -*- coding: utf-8 -*-
 """
 Interactive, visual thin layer atop appman
+
+TODOs:
+-   Feature	appman  CLI	            vappman Status	Re-announcement Value
+-   Bootstrapping	N/A	            Missing	        Critical (Ease of use)
+-   Sandboxing	    -ias	        Missing	        High (Security)
+-   NeoDB Support	--soarpkg, etc.	Missing	        Medium (Content)
+-   Snapshots	    -b, -o	        Partially (Manual)	High (Safety)
+-   Icon Theme      Sync	--icons	Missing	        Low (Aesthetics)
+
+*   One-command setup: Don't have appman (or am)? vappman will now set it up for you.
+    -If a user runs vappman and appman isn't found, offering to install it
+     (and its core dependencies like curl, zsync, etc.) removes the
+     biggest barrier to entry.
+    - The Pitch: "Experience 2500+ Linux apps with zero setup—vappman now bootstraps
+      your entire AppImage management environment."
+
+*   Security First: Integrated sandboxing support—run untrusted apps in a click.
+    - appman has built-in support for sandboxing via the -ias or --sandbox flags
+      (often using Firejail).
+    - High Value: Add a b (for "Box") or S (for "Sandbox") key.
+    - Why? Security is the #1 concern for AppImage users. A TUI that lets you
+      "Search -> Highlight -> Install with Sandbox" is a power-user's dream.
+
+*   More than AppImages: Full support for the NeoDB ecosystem (Soarpkgs, AppBundles).
+    - The current appman help shows it's no longer just for standard AppImages. It now handles:
+    - Soarpkgs: High-performance static binaries.
+    - AppBundles: PELF-based portable apps.
+    - Python AppImages: Side-by-side Python versions.
+    - The Feature: Add a "Repo Toggle" or a "Global Search" (using appman -q --all)
+      so users can discover these formats without needing to know the CLI flags.
+*   Safe Updates: One-key snapshots and rollbacks.
+    appman supports -b (backup) and --rollback (downgrade).
+    - The Feature: In the "Installed Apps" view, let users hit B to take a snapshot or
+      L (Legacy/List) to see available rollbacks for that specific app.
+    - Why? This is the "Time Machine" for Linux apps. If an update breaks a tool,
+      vappman could be the easiest way to fix it.
+* 5. Metadata & "About" Integration
+    - Your README mentions vappman covers (-a) about, but making this instant is key.
+    - Improvement: A side-pane or a toggleable window that shows the appman -a info for
+      the currently highlighted app before the user even hits a key to install.
+---
+      
+Based on the ivan-hc/AM repository and recent updates, there is a very clear distinction—and a significant
+branding shift—that provides you with the perfect "excuse" for a vappman revamp.
+1. The Core Issue: AM vs. AppMan
+
+The developer has effectively merged the logic into a single codebase, but uses two different "entry points" depending on user privilege:
+ * am (The Flagship): Intended for users with root/sudo access.
+   It installs apps system-wide (e.g., in /opt) by default.
+ * appman (The Rootless Side): A "portable" version of the same script.
+   If you rename the main APP-MANAGER script to appman, it automatically switches to "AppMan mode,"
+   installing everything locally in $HOME without requiring sudo.
+
+The "Revamp" Opportunity: Currently, vappman is hardcoded to look for appman.
+  - If a user has installed the full am suite, vappman might not even "see" it or work with it properly.
+
+2. Does it make sense to change? Yes.
+
+   -To stay relevant with Ivan-HC’s ecosystem, vappman should transition from being a "wrapper for AppMan" to a "TUI for AM/AppMan."
+
+The "High Value" Roadmap for your Re-announcement:
+
+  - Auto-Detection & Support for am: vappman should check for am first, then appman. If am is present,
+    it should use it (perhaps adding a toggle for --user mode). This broadens your user base to everyone using the main AM project.
+
+  - The "Bootstrap" Installer: Since Ivan-HC now provides a unified AM-INSTALLER script,
+    vappman can offer to run it if neither is found. This makes vappman a "zero-dependency" entry point for new users.
+
+  - Sandboxing Integration (Version 9+ Feature): The latest AM (v9.3+) now supports sandboxing
+    during installation in one go. Adding a "Secure Install" key (using -ias) in vappman is a major
+    feature that aligns with the current development of the backend.
+
+  - Snapshot Management: AM has introduced named snapshots (v8.4). vappman could allow users to manage
+    these backups visually, which is much more intuitive than the CLI.
+
+Suggested Re-announcement Pitch: "The AM/AppMan Unified Interface"
+   - Headline: Re-introducing vappman: Now a complete TUI for the "AM" Application Manager ecosystem.
+   - The Narrative: " I’ve rebuilt vappman to be the ultimate visual dashboard for both. Whether you’re a
+      power user installing system-wide with am or a local user with appman, vappman now handles the heavy lifting."
+
+New Feature Highlights:
+    - Dual-Engine Support: Automatically detects and works with either am or appman.
+    - One-Click Sandboxing: Leverage the new AM 9.3+ sandboxing features directly from the TUI.
+    - Visual Snapshots: Manage your app backups and rollbacks without memorizing CLI flags.
+    - The 'Zero-to-App' Experience: If you don't have the backend installed,
+      vappman will now bootstrap the official AM-INSTALLER for you.
+
+    Why this works: It stops being "just another tool" and starts being the "Official-feeling TUI"
+    for a very active and popular project. It solves the confusion between am and appman for the user by abstracting it away.
+
+    
+That testing hurdle is actually a common "developer’s trap." You’re trying to test two distinct system states on one machine, which leads to "configuration drift"—where your tests for `appman` start failing because `am` left a file in `/opt` or vice versa.
+
+The good news is that because the `APP-MANAGER` script is now unified, you can "spoof" the environments without actually needing two machines or deep system changes.
+
+---
+
+### 1. The "Poor Man's" Sandbox: Binary Aliasing
+
+Since the backend script behaves differently based on its **filename**, you can test the logic on one system by simply creating two symlinks to the same source script in a local testing directory.
+
+1. Download the master script: `wget https://raw.githubusercontent.com/ivan-hc/AM/main/APP-MANAGER`
+2. Create two symlinks:
+* `ln -s APP-MANAGER am`
+* `ln -s APP-MANAGER appman`
+
+
+3. **The Trick:** Modify your `vappman` test environment to point its `$PATH` to this local folder first. You can then toggle which one `vappman` "sees" by just deleting/renaming the symlinks.
+
+### 2. The Professional Fix: Containerization (Distrobox)
+
+If you want to be 100% sure without messing up your host, use **Distrobox**. It is a tool that lets you run any Linux distro inside your terminal with full access to your home directory, but a separate system area (`/opt`, `/usr/bin`).
+
+* **Setup:** Create two containers:
+* `distrobox create -n am-test --image fedora`
+* `distrobox create -n appman-test --image fedora`
+
+
+* **Workflow:**
+* In `am-test`, run the `AM` installer (System mode).
+* In `appman-test`, run the `AppMan` installer (User mode).
+
+
+* **Why this wins:** You can have two terminal tabs open simultaneously—one acting as a "System Mode" machine and one as a "User Mode" machine. You just run `vappman` inside them, and they will behave exactly like real-world installs.
+
+### 3. Spoofing via Environment Variables
+
+If you want to automate your testing, you can add a "Debug Mode" to `vappman` that overrides the discovery logic.
+
+```python
+# Pseudo-code for your vappman overhaul
+VAPPMAN_FORCE_MODE = os.getenv("VAPPMAN_TEST_MODE") # 'am' or 'appman'
+
+if VAPPMAN_FORCE_MODE == 'am':
+    active_manager = "am"
+    needs_sudo = True
+elif VAPPMAN_FORCE_MODE == 'appman':
+    active_manager = "appman"
+    needs_sudo = False
+else:
+    # ... your normal auto-discovery logic
+
+```
+
+This lets you test both code paths by just running `VAPPMAN_TEST_MODE=am vappman`.
+
+---
+
+### The Final "Excuse" for the Re-Announcement
+
+Combining everything we've discussed, here is your high-value pitch:
+
+**"vappman 1.0: The Bridge to the Unified AM Ecosystem"**
+
+* **Intelligent Auto-Discovery:** No more manual configuration. `vappman` automatically detects if you're using `am` (System) or `appman` (User) and adapts the UI.
+* **The 'Safe-Sudo' Flow:** It only asks for root permissions when you are performing a system-wide action. Your TUI remains unprivileged and safe.
+* **Unified App View:** See your system-wide apps and local apps in one scannable list, with visual indicators for where they are stored.
+* **Seamless Onboarding:** Don't have the manager? `vappman` will bootstrap the official environment for you with one click.
+
+**Would you like me to draft the "Bootstrap" logic code for you, so you can see how `vappman` would offer to install the manager if it's missing?**
 """
 # pylint: disable=broad-exception-caught,consider-using-with
 # pylint: disable=too-many-instance-attributes,too-many-branches
@@ -19,7 +179,90 @@ import shlex
 import subprocess
 import traceback
 import curses as cs
-from console_window import ConsoleWindow, OptionSpinner
+from .ConsoleWindow import (
+    ConsoleWindow, OptionSpinner, ConsoleWindowOpts,
+    Screen, ScreenStack, BasicHelpScreen, HOME_ST
+)
+
+# Screen constants
+HOME_ST, HELP_ST = 0, 1
+SCREENS = ['HOME', 'HELP']
+
+
+class HomeScreen(Screen):
+    """Main home screen showing installed and available apps"""
+
+    def draw_screen(self):
+        """Draw the home screen with app list"""
+        app = self.app
+        win = self.win
+
+        def wanted(line):
+            return not app.filter or app.filter.search(line)
+
+        def version_of(appname):
+            # ◆  krita      |  5.2.2   |  appimage-type2  |  355   MiB
+            fields = app.installs[appname].split('|')
+            if len(fields) >= 2:
+                return fields[1].strip()
+            return '?version?'
+
+        win.set_pick_mode(True)
+        win.add_header(app.get_keys_line(), attr=cs.A_BOLD)
+
+        # Show installed apps first
+        for appname, line in app.installs.items():
+            if appname in app.apps:
+                line = app.apps[appname]
+            if wanted(line[2:]):
+                line = f'✔✔✔ {appname} [{version_of(appname)}] :{line.split(":", maxsplit=1)[1]}'
+                win.add_body(line)
+
+        # Then show available (not installed) apps
+        for appname, line in app.apps.items():
+            if appname not in app.installs and wanted(line[2:]):
+                win.add_body(line)
+                
+    def remove_ACTION(self):
+        """ TBD """
+        app = self.app
+        if app.pick_is_installed:
+            app.run_appman('remove', app.pick_app)
+            return None
+
+
+
+class VappmanHelpScreen(BasicHelpScreen):
+    """Help screen with vappman-specific additions"""
+
+    def draw_screen(self):
+        """Draw help screen with extra vappman info"""
+        # Call parent to show standard help
+        super().draw_screen()
+
+        # Add vappman-specific help lines
+        lines = [
+            '',
+            'ALWAYS AVAILABLE:',
+            '   a - about (more info about app)',
+            '   s - sync (update appman itself)',
+            '   c - clean (remove unneeded files/folders)',
+            '   U - update ALL installed apps',
+            '   R - reinstall ALL apps w updated install script',
+            '   q or x - quit program (CTL-C disabled)',
+            '   / - filter apps by keywords or regex',
+            '   ESC = clear filter and jump to top',
+            '   ENTER = install, remove, or return from help',
+            'CONTEXT SENSITIVE:',
+            '   i - install uninstalled app',
+            '   r - remove installed app',
+            '   u - update installed app',
+            '   b - backup installed app',
+            '   o - overwrite app from its backup',
+            '   t - test by opening a terminal emulator and launching the app',
+        ]
+        for line in lines:
+            self.win.put_body(line)
 
 
 class Vappman:
@@ -33,13 +276,25 @@ class Vappman:
 
         spin = self.spin = OptionSpinner()
         spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
+        spin.add_key('about', 'a - about (more info about app)', genre='action')
+        spin.add_key('sync', 's - sync (update appman itself)', genre='action')
+        spin.add_key('clean', 'c - clean (remove unneeded files/folders)', genre='action')
+        spin.add_key('update_all', 'U - update ALL installed apps', genre='action')
+        spin.add_key('reinstall_all', 'R - reinstall ALL apps w updated install script', genre='action')
+        spin.add_key('quit', 'q or x - quit program (CTL-C disabled)', genre='action', keys='qx')
+        spin.add_key('slash', '/ - filter apps by keywords or regex', genre='action')
+        spin.add_key('escape', 'ESC = clear filter and jump to top', genre='action', keys=27)
+        spin.add_key('install', 'i,ENTER - install uninstalled app', genre='action')
+        spin.add_key('remove', 'r,ENTER - remove installed app', genre='action')
+        spin.add_key('update', 'u - update installed app', genre='action')
+        spin.add_key('backup', 'b - backup installed app', genre='action')
+        spin.add_key('overwrite', 'o - overwrite app from its backup', genre='action')
+        spin.add_key('test', 't - test (open a terminal and run app', genre='action')
 
         # EXPAND
-        other = 'airtbou/qxscUR'
-        other_keys = set(ord(x) for x in other)
-        other_keys.add(cs.KEY_ENTER)
-        other_keys.add(27) # ESCAPE
-        other_keys.add(10) # another form of ENTER
+        other_keys = set([cs.KEY_ENTER, 10])
+        # other_keys.add(27) # ESCAPE
+        # other_keys.add(10) # another form of ENTER
         self.opts = spin.default_obj
 
         self.actions = {} # currently available actions
@@ -47,29 +302,48 @@ class Vappman:
         self.pick_is_installed = False
         self.prev_filter = '' # string
         self.filter = None # compiled pattern
-        self.check_preqreqs()
         self.apps = self.cmd_dict('appman list')
         self.installs = self.get_installed() # dict keyed by app
         self.appman_dir = self.get_appman_dir()
         self.dot_desktop_dir = self.get_dot_desktop_dir()
         self.terminal_emulator = None
-        self.win = ConsoleWindow(head_line=True, body_rows=len(self.apps)+20, head_rows=10,
-                          keys=spin.keys ^ other_keys, mod_pick=self.mod_pick)
+        win_opts = ConsoleWindowOpts()
+        win_opts.head_line=True
+        win_opts.body_rows=len(self.apps)+20
+        win_opts.head_rows = 10
+        win_opts.keys = spin.keys ^ other_keys
+        win_opts.mod_pick = self.mod_pick
+        win_opts.pick_attr = cs.A_BOLD|cs.A_UNDERLINE
+        self.win = ConsoleWindow(win_opts)
+        self.has_am = None
 
-    @staticmethod
-    def check_preqreqs():
+        # Initialize screens and screen stack
+        self.screens = {
+            HOME_ST: HomeScreen(self),
+            HELP_ST: VappmanHelpScreen(self),
+        }
+        self.ss = ScreenStack(self.win, self.opts, SCREENS, self.screens)
+        self.prev_pos = 0
+        self.next_prompt_seconds = [0.1, 0.1]  # Initial fast renders, then slow down
+
+    def check_preqreqs(self):
         """ Check that needed programs are installed. """
-        ok = True
-        for prog in 'curl grep jq sed wget appman'.split():
+        missing = set()
+        self.has_am = bool (shutil.which('am') is not None
+                       or shutil.which('appman') is not None)
+        for prog in 'curl grep jq sed wget'.split():
             if shutil.which(prog) is None:
-                ok = False
-                print(f'ERROR: cannot find {prog!r} on $PATH')
-                if prog == 'appman':
-                    print('Install appman with:')
-                    print("""mkdir -p ~/.local/bin && cd /tmp &&"""
-                          """ wget https://raw.githubusercontent.com/ivan-hc/AM/main/APP-MANAGER"""
-                          """ -O appman && chmod a+x ./appman && mv ./appman ~/.local/bin/appman""")
-        if not ok:
+                missing.add(prog)
+                
+        if missing:
+                print(f'ERROR: cannot find {missing} on $PATH')
+
+        if not self.has_am:
+            print('Install appman/am with:')
+            print("""wget -q https://raw.githubusercontent.com/ivan-hc/AM/main/AM-INSTALLER"""
+                  """ && chmod a+x ./AM-INSTALLER && ./AM-INSTALLER && rm ./AM-INSTALLER""")
+
+        if not self.has_am or missing:
             sys.exit(1)
 
     def cmd_dict(self, cmd, start=r'\s*◆\s'):
@@ -174,64 +448,75 @@ class Vappman:
             print('    Check if contents of ~/.local/share/applications for .desktop files')
             return None
 
+    def navigate_to(self, screen_num):
+        """Navigate to a screen with validation hooks."""
+        result = self.ss.push(screen_num, self.prev_pos)
+        if result is not None:
+            self.prev_pos = result
+            return True
+        return False
+
+    def navigate_back(self):
+        """Navigate back to previous screen."""
+        result = self.ss.pop()
+        if result is not None:
+            self.prev_pos = result
+            return True
+        return False
+
+    def handle_escape(self):
+        """Handle ESC key - clear filter or go back."""
+        if self.ss.stack:
+            return self.navigate_back()
+        # If no stack, clear filter and jump to top
+        self.prev_filter = ''
+        self.filter = None
+        self.win.pick_pos = 0
+        return True
+
     def main_loop(self):
-        """ TBD """
+        """Main application loop using screen stack navigation."""
+        win = self.win
 
-        self.opts.name = "[hit 'n' to enter name]"
         while True:
-            if self.opts.help_mode:
-                self.win.set_pick_mode(False)
-                self.spin.show_help_nav_keys(self.win)
-                self.spin.show_help_body(self.win)
-                # EXPAND
-                lines = [
-                    'ALWAYS AVAILABLE:',
-                    '   a - about (more info about app)',
-                    '   s - sync (update appman itself)',
-                    '   c - clean (remove unneeded files/folters)',
-                    '   U - update ALL installed apps',
-                    '   R - reinstall ALL apps w updated install script',
-                    '   q or x - quit program (CTL-C disabled)',
-                    '   / - filter apps by keywords or regex',
-                    '   ESC = clear filter and jump to top',
-                    '   ENTER = install, remove, or return from help',
-                    'CONTEXT SENSITIVE:',
-                    '   i - install uninstalled app',
-                    '   r - remove installed app',
-                    '   u - update installed app',
-                    '   b - backup installed app',
-                    '   o - overwrite app from its backup',
-                    '   t - test by opening a terminal emulator and launching the app',
+            # Get and draw current screen
+            screen_num = self.ss.curr.num
+            self.screens[screen_num].draw_screen()
 
-                ]
-                for line in lines:
-                    self.win.put_body(line)
-            else:
-                def wanted(line):
-                    return not self.filter or self.filter.search(line)
-                def version_of(app):
-                    # ◆  krita      |  5.2.2   |  appimage-type2  |  355   MiB
-                    fields = self.installs[app].split('|')
-                    if len(fields) >= 2:
-                        return fields[1].strip()
-                    return '?version?'
+            win.render()
+            key = win.prompt(seconds=self.next_prompt_seconds[0])
 
-                # self.win.set_pick_mode(self.opts.pick_mode, self.opts.pick_size)
-                self.win.set_pick_mode(True)
-                self.win.add_header(self.get_keys_line(), attr=cs.A_BOLD)
-                for app, line in self.installs.items():
-                    if app in self.apps:
-                        line = self.apps[app]
-                    if wanted(line[2:]):
-                        line = f'✔✔✔ {app} [{version_of(app)}] :{line.split(':', maxsplit=1)[1]}'
-                        self.win.add_body(line)
-                for app, line in self.apps.items():
-                    if app not in self.installs and wanted(line[2:]):
-                        self.win.add_body(line)
-            self.win.render()
+            # Adjust prompt timing (fast initially, then slower)
+            self.next_prompt_seconds.pop(0)
+            if not self.next_prompt_seconds:
+                self.next_prompt_seconds = [3.0]
 
-            _ = self.do_key(self.win.prompt(seconds=300))
-            self.win.clear()
+            if key is not None:
+                # Let OptionSpinner process the key
+                self.spin.do_key(key, win)
+
+                # Handle quit
+                if self.opts.quit:
+                    self.opts.quit = False
+                    break
+
+#               # Handle escape
+#               if self.ss.act_in('escape'):
+#                   self.handle_escape()
+
+                # Handle help mode navigation
+                if self.opts.help_mode:
+                    if self.ss.curr.num != HELP_ST:
+                        self.navigate_to(HELP_ST)
+                else:
+                    if self.ss.curr.num == HELP_ST:
+                        self.navigate_back()
+
+                # Delegate key handling to old do_key for now
+                # (will refactor actions to screen classes later)
+                self.do_key(key)
+
+            win.clear()
 
     def get_keys_line(self):
         """ TBD """
@@ -449,7 +734,16 @@ class Vappman:
 
         if key in self.spin.keys:
             value = self.spin.do_key(key, self.win)
-            return value
+            # return value
+
+        # Actions delegated to screen classes
+        screen_actions = [
+            'remove',
+        ]
+        current_screen = self.screens[self.ss.curr.num]
+        for action in screen_actions:
+            if self.ss.act_in(action):
+                current_screen.handle_action(action)
 
         if key == 27: # ESCAPE
             self.prev_filter = ''
@@ -464,10 +758,6 @@ class Vappman:
 
         if key == ord('i') and not self.pick_is_installed:
             self.run_appman('install', self.pick_app)
-            return None
-
-        if key == ord('r') and self.pick_is_installed:
-            self.run_appman('remove', self.pick_app)
             return None
 
         if key == ord('t') and self.pick_is_installed:
