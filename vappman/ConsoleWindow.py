@@ -61,6 +61,7 @@ Example usage:
 # pylint: disable=line-too-long,too-many-statements,too-many-locals
 
 import sys
+import re
 import traceback
 import atexit
 import signal
@@ -87,6 +88,19 @@ class Context:
     :type genre: str
     :type pickable: bool
 
+    **Special attributes for pick_mode:**
+
+    :param abut: Defines visible line range around picked line in pick_mode.
+                 When set, only lines within [picked_line + before, picked_line + after] are visible.
+                 "After" lines are prioritized when the range exceeds the viewport.
+
+                 Formats:
+                   - Negative int: lines before (e.g., abut=-3 shows 3 before, 0 after)
+                   - Positive int: lines after (e.g., abut=7 shows 0 before, 7 after)
+                   - List/tuple: [before, after] (e.g., abut=[-5, 3] shows 5 before, 3 after)
+                   - Mixed list: min negative and max positive values are used
+                     (e.g., abut=[-8, 3, -2, 12] → before=-8, after=12)
+
     Example::
 
         ctx = Context(genre='app', pickable=True,
@@ -97,6 +111,11 @@ class Context:
         ctx = win.get_picked_context()
         if ctx and ctx.genre == 'app':
             print(f"Selected: {ctx.app_name}")
+
+        # Example with abut to limit visible context:
+        ctx = Context(genre='result', pickable=True, abut=[-10, 20])
+        win.put_body("Search result", context=ctx)
+        # When this line is picked, only 10 lines before and 20 after are visible
     """
     def __init__(self, genre='', pickable=True, **kwargs):
         self.genre = genre
@@ -132,7 +151,7 @@ class ConsoleWindowOpts:
         :param mod_pick: Optional callable to modify highlighted text (default: None)
         :param pick_attr: Curses attribute for highlighting picked items (default: curses.A_REVERSE)
         :param ctrl_c_terminates: If True, Ctrl-C terminates; if False, returns key 3 (default: True)
-        :param return_if_pos_change: If True, prompt returns when pick position changes (default: False)
+        :param return_if_pos_change: If True, prompt returns when pick position changes for immediate redraw (default: True)
         :param min_cols_rows: Minimum terminal size as (cols, rows) tuple (default: (70, 20))
         :param dialog_abort: How ESC aborts dialogs: None, "ESC", "ESC-ESC" (default: "ESC")
         :param dialog_return: Which key submits dialogs: "ENTER", "TAB" (default: "ENTER")
@@ -149,7 +168,7 @@ class ConsoleWindowOpts:
         self.mod_pick = kwargs.get('mod_pick', None)
         self.pick_attr = kwargs.get('pick_attr', curses.A_REVERSE)
         self.ctrl_c_terminates = kwargs.get('ctrl_c_terminates', True)
-        self.return_if_pos_change = kwargs.get('return_if_pos_change', False)
+        self.return_if_pos_change = kwargs.get('return_if_pos_change', True)
         self.min_cols_rows = kwargs.get('min_cols_rows', (70, 20))
         self.dialog_abort = kwargs.get('dialog_abort', 'ESC')
         self.dialog_return = kwargs.get('dialog_return', 'ENTER')
@@ -195,10 +214,14 @@ class OptionSpinner:
 
     It also generates a formatted help screen based on the registered options.
     """
-    def __init__(self):
+    def __init__(self, stack=None):
         """
         Initializes the OptionSpinner, setting up internal mappings for options
         and keys.
+
+        :param stack: Optional ScreenStack reference for scope-aware key bindings.
+                      If stack.obj is None, it will be set to this spinner's default_obj.
+        :type stack: ScreenStack or None
         """
         self.options, self.keys = [], []
         self.margin = 4 # + actual width (1st column right pos)
@@ -207,6 +230,12 @@ class OptionSpinner:
         self.attr_to_option = {} # given an attribute, find its option ns
         self.key_to_option = {} # given key, options namespace
         self.keys = set()
+        self.stack = stack  # Optional ScreenStack for scope-aware bindings
+        self.key_scopes = {}  # Maps (key, screen) -> option_ns for scope tracking
+
+        # If stack has None obj, give it our default_obj
+        if self.stack and self.stack.obj is None:
+            self.stack.obj = self.default_obj
 
     @staticmethod
     def _make_option_ns():
@@ -220,6 +249,7 @@ class OptionSpinner:
             prompt=None,
             comments=[],
             genre=None,
+            scope=None,  # None = all screens, or set of screen numbers
         )
 
     def get_value(self, attr, coerce=False):
@@ -249,13 +279,80 @@ class OptionSpinner:
         return value
 
     def _register(self, ns):
-        """Create the internal mappings needed for a new option namespace."""
-        assert ns.attr not in self.attr_to_option
+        """
+        Create the internal mappings needed for a new option namespace.
+        Handles scope subtraction for overlapping keys.
+        """
+        if ns.attr in self.attr_to_option:
+            existing = self.attr_to_option[ns.attr]
+            raise ValueError(
+                f"Attribute '{ns.attr}' already registered with description '{existing.descr}'. "
+                f"Each add_key() must have a unique attr name. "
+                f"If you want the same key on different screens, use different attr names with scope parameter."
+            )
         self.attr_to_option[ns.attr] = ns
+
+        # Get all screen numbers for scope calculations
+        all_screens = set(range(len(self.stack.screens))) if self.stack else set()
+
+        # Calculate effective scope for this new key
+        # If scope is None and it's an action, need to determine which screens have this action
+        if ns.scope is None:
+            if ns.genre == 'action' and self.stack and self.stack.screen_objects:
+                # Find all screens that implement this action (have method with name = attr)
+                effective_scope = set()
+                for screen_num, screen_obj in self.stack.screen_objects.items():
+                    if hasattr(screen_obj, ns.attr):
+                        effective_scope.add(screen_num)
+                # If no screens found, default to all screens
+                if not effective_scope:
+                    effective_scope = all_screens
+            else:
+                # Not an action, or no stack available: all screens
+                effective_scope = all_screens
+        else:
+            effective_scope = ns.scope.copy()
+
+        # Store the effective scope in the namespace
+        ns.effective_scope = effective_scope
+
+        # Process each key for scope subtraction
         for key in ns.keys:
-            assert key not in self.key_to_option, f'key ({chr(key)}, {key}) already used'
-            self.key_to_option[key] = ns
+            # Perform subtraction FIRST: remove new scope from existing options with same key
+            for existing_ns in self.options:
+                if key in existing_ns.keys and hasattr(existing_ns, 'effective_scope'):
+                    # Subtract the new scope from existing option's scope
+                    # Also remove from key_scopes for screens that are being taken over
+                    overlap = existing_ns.effective_scope & effective_scope
+                    for screen_num in overlap:
+                        if (key, screen_num) in self.key_scopes:
+                            del self.key_scopes[(key, screen_num)]
+                    existing_ns.effective_scope -= effective_scope
+
+            # NOW check for conflicts: same key defined twice for the same screen
+            # (After subtraction, there should be no conflicts if subtraction worked)
+            for screen_num in effective_scope:
+                if (key, screen_num) in self.key_scopes:
+                    # This should not happen after subtraction
+                    existing_ns = self.key_scopes[(key, screen_num)]
+                    key_char = chr(key) if 32 <= key < 127 else f'<{key}>'
+                    raise ValueError(
+                        f'Key {key_char} ({key}) already defined for screen {screen_num} '
+                        f'in option "{existing_ns.descr}". Cannot define same key twice for same screen.'
+                    )
+
+            # Store in key_scopes for each screen in the effective scope
+            for screen_num in effective_scope:
+                self.key_scopes[(key, screen_num)] = ns
+
+            # Update global key tracking (if not using scopes, keep old behavior)
+            if not self.stack:
+                if key in self.key_to_option:
+                    raise ValueError(f'key ({chr(key)}, {key}) already used')
+                self.key_to_option[key] = ns
+
             self.keys.add(key)
+
         self.options.append(ns)
         self.align = max(self.align, self.margin+len(ns.descr))
         self.get_value(ns.attr, coerce=True)
@@ -291,7 +388,7 @@ class OptionSpinner:
             self._register(ns)
 
     def add_key(self, attr, descr, obj=None, vals=None, prompt=None,
-                keys=None, comments=None, genre=None):
+                keys=None, comments=None, genre=None, scope=None):
         """
         Adds an option that is toggled by a key press.
 
@@ -309,6 +406,11 @@ class OptionSpinner:
                      If None, uses the first letter of ``descr``.
         :param comments: Additional line(s) for the help screen item (string or list of strings).
         :param genre: (action, cycle, prompt)
+        :param scope: Screen number(s) where this key is active. Can be:
+                      - None (default): all screens, or all screens with action if genre='action'
+                      - int: single screen number
+                      - list/set: multiple screen numbers
+                      Later add_key() calls for the same key subtract from earlier scopes.
         :type attr: str
         :type descr: str
         :type obj: Any
@@ -317,6 +419,7 @@ class OptionSpinner:
         :type keys: int or list or tuple or None
         :type comments: str or list or tuple or None
         :type genre: str or None
+        :type scope: int or list or set or None
         """
 
         ns = self._make_option_ns()
@@ -345,6 +448,17 @@ class OptionSpinner:
         else:
             # assert genre == 'action' # only one choice left ('action')
             ns.genre = 'action'
+
+        # Process scope parameter
+        if scope is None:
+            ns.scope = None  # All screens (or all screens with action)
+        elif isinstance(scope, int):
+            ns.scope = {scope}
+        elif isinstance(scope, (list, tuple, set)):
+            ns.scope = set(scope)
+        else:
+            raise ValueError(f"scope must be None, int, or list/set, got {type(scope)}")
+
         self._register(ns)
 
     @staticmethod
@@ -359,17 +473,41 @@ class OptionSpinner:
             if line:
                 win.add_header(line)
 
-    def show_help_body(self, win):
+    def show_help_body(self, win, screen_filter=None):
         """
         Writes the formatted list of all registered options and their current
         values to the body of the provided :py:class:`ConsoleWindow`.
 
+        When using ScreenStack with scoped keys, only shows options applicable
+        to the specified screens.
+
         :param win: The :py:class:`ConsoleWindow` instance to write to.
+        :param screen_filter: Screen number(s) to filter options for. Can be:
+                              - None: show all options (default)
+                              - int: single screen number
+                              - list/set: multiple screen numbers (typically [prev_screen, help_screen])
         :type win: ConsoleWindow
+        :type screen_filter: int or list or set or None
         """
         win.add_body('Type keys to alter choice:', curses.A_UNDERLINE)
 
+        # Convert screen_filter to a set for easy comparison
+        if screen_filter is None:
+            filter_screens = None
+        elif isinstance(screen_filter, int):
+            filter_screens = {screen_filter}
+        elif isinstance(screen_filter, (list, tuple, set)):
+            filter_screens = set(screen_filter)
+        else:
+            filter_screens = None
+
         for ns in self.options:
+            # Skip options not applicable to the filtered screens
+            if filter_screens is not None and hasattr(ns, 'effective_scope'):
+                # Check if this option applies to any of the filter screens
+                if not (ns.effective_scope & filter_screens):
+                    continue
+
             # get / coerce the current value
             value = self.get_value(ns.attr)
             assert value is not None, f'cannot get value of {repr(ns.attr)}'
@@ -404,7 +542,16 @@ class OptionSpinner:
         :returns: The new value of the option, or None if the key is unhandled.
         :rtype: Any or None
         """
-        ns = self.key_to_option.get(key, None)
+        # Try scoped lookup first (if stack is available)
+        ns = None
+        if self.stack and hasattr(self.stack, 'curr') and self.stack.curr:
+            current_screen = self.stack.curr.num
+            ns = self.key_scopes.get((key, current_screen), None)
+
+        # Fall back to global lookup (for backward compatibility without scopes)
+        if ns is None:
+            ns = self.key_to_option.get(key, None)
+
         if ns is None:
             return None
         value = self.get_value(ns.attr)
@@ -534,10 +681,27 @@ class ConsoleWindow:
         self.rows, self.cols = 0, 0
         self.body_cols, self.body_rows = self.opts.body_cols, self.opts.body_rows
         self.scroll_view_size = 0  # no. viewable lines of the body
-        self.handled_keys = set(self.opts.keys) if isinstance(self.opts.keys, (set, list)) else []
+        self.handled_keys = set(self.opts.keys) if isinstance(self.opts.keys, (set, list)) else set()
         self.pending_keys = set()
         self._set_screen_dims()
         self.calc()
+
+    def set_handled_keys(self, keys):
+        """
+        Set or update the keys that prompt() should return to the application.
+
+        This allows keys to be set after initialization, breaking circular dependencies.
+
+        :param keys: Collection of key codes (set, list, or OptionSpinner with .keys attribute)
+        :type keys: set or list or OptionSpinner
+        """
+        if hasattr(keys, 'keys'):
+            # It's an OptionSpinner or similar object
+            self.handled_keys = set(keys.keys) if keys.keys else set()
+        elif isinstance(keys, (set, list)):
+            self.handled_keys = set(keys)
+        else:
+            self.handled_keys = set()
 
     def get_pad_width(self):
         """
@@ -576,6 +740,33 @@ class ConsoleWindow:
         if self.pick_pos < 0 or self.pick_pos >= len(self.body.contexts):
             return None
         return self.body.contexts[self.pick_pos]
+
+    def _cook_abut(self, abut_value):
+        """
+        Parse the abut attribute into [before, after] format.
+
+        :param abut_value: Can be:
+            - negative int: lines before (e.g., -3 -> [-3, 0])
+            - positive int: lines after (e.g., 7 -> [0, 7])
+            - list/tuple [before, after]: explicit range (e.g., [-5, 3])
+        :returns: Tuple (before, after) where before <= 0 and after >= 0
+        :rtype: tuple
+        """
+        if abut_value is None:
+            return None
+
+        if isinstance(abut_value, (list, tuple)):
+            # Extract min negative and max positive
+            before = min((x for x in abut_value if x < 0), default=0)
+            after = max((x for x in abut_value if x >= 0), default=0)
+            return (before, after)
+        elif isinstance(abut_value, int):
+            if abut_value < 0:
+                return (abut_value, 0)
+            else:
+                return (0, abut_value)
+        else:
+            return None
 
     @staticmethod
     def get_nav_keys_blurb():
@@ -833,6 +1024,109 @@ class ConsoleWindow:
         """
         self._add(self.body, text, attr, resume, context)
 
+    def add_fancy_header(self, line, mode='Underline'):
+        """
+        Parses header line and adds it with fancy formatting.
+
+        Modes:
+        - 'Off': Normal formatting (no special handling)
+        - 'Underline': Underlined and bold keys
+        - 'Reverse': Reverse video keys
+
+        Converts [x]text to formatted x (brackets removed).
+        Handles x:text patterns by formatting x.
+        Handles /pattern by highlighting the entire pattern.
+        Multi-character keys like ESC:, ENTER:, TAB: are supported.
+
+        :param line: The header text to add with formatting
+        :param mode: Formatting mode ('Off', 'Underline', or 'Reverse')
+        :type line: str
+        :type mode: str
+        """
+        if mode == 'Off':
+            # Fancy mode off, just add the line normally
+            self.add_header(line)
+            return
+
+        # Choose the attribute based on mode
+        key_attr = (curses.A_UNDERLINE | curses.A_BOLD) if mode == 'Underline' else curses.A_REVERSE
+
+        # List of (text, attr) tuples
+        result_sections = []
+        i = 0
+        current_text = ""
+
+        # Check if line starts with all-caps word and extract it
+        stripped = line.lstrip()
+        if stripped:
+            first_word_match = stripped.split()[0] if stripped.split() else ''
+            if first_word_match and re.match(r'^[\w-]+$', first_word_match):
+                # Add leading whitespace
+                leading_space = line[:len(line) - len(stripped)]
+                if leading_space:
+                    result_sections.append((leading_space, None))
+                # Add the all-caps word in BOLD
+                result_sections.append((first_word_match, curses.A_BOLD))
+                # Skip past it in our processing
+                i = len(leading_space) + len(first_word_match)
+
+        while i < len(line):
+            # Check for [x]text pattern
+            if line[i] == '[' and i + 2 < len(line) and line[i + 2] == ']':
+                # Save any accumulated normal text
+                if current_text:
+                    result_sections.append((current_text, None))
+                    current_text = ""
+
+                # Extract the key letter and add it with chosen attribute
+                key_char = line[i + 1]
+                result_sections.append((key_char, key_attr))
+                i += 3  # Skip past [x]
+
+            # Check for multi-character key names like ESC:, ENTER:, TAB:
+            elif (i == 0 or line[i - 1] == ' '):
+                # Look ahead for uppercase word followed by colon
+                match = re.match(r'([A-Z]{2,}|[A-Z]):', line[i:])
+                if match:
+                    # Found a key name followed by colon
+                    if current_text:
+                        result_sections.append((current_text, None))
+                        current_text = ""
+
+                    key_name = match.group(1)
+                    result_sections.append((key_name, key_attr))
+                    result_sections.append((':', None))  # Add the colon without formatting
+                    i += len(key_name) + 1  # Skip past key and colon
+                else:
+                    match = re.match(r'/(\S+)', line[i:])
+                    if match:
+                        # Found a search pattern
+                        if current_text:
+                            result_sections.append((current_text, None))
+                            current_text = ""
+
+                        full_pattern = match.group(0)  # includes the /
+                        result_sections.append((full_pattern, curses.A_BOLD | curses.A_REVERSE))
+                        i += len(full_pattern)
+                    else:
+                        # Not a key pattern, just regular character
+                        current_text += line[i]
+                        i += 1
+
+            else:
+                # Regular character
+                current_text += line[i]
+                i += 1
+
+        # Add any remaining text
+        if current_text:
+            result_sections.append((current_text, None))
+
+        # Now output the sections using add_header with resume
+        for idx, (text, attr) in enumerate(result_sections):
+            resume = bool(idx > 0)  # Resume for all but the first section
+            self.add_header(text, attr=attr, resume=resume)
+
     def draw(self, y, x, text, text_attr=None, width=None, leftpad=False, header=False):
         """
         Draws the given text at a specific position (row=y, col=x) on a pad.
@@ -1047,6 +1341,10 @@ class ConsoleWindow:
         :rtype: int
         """
         self.calc()
+
+        # Save old pick position to check for abut constraints before applying delta
+        old_pick_pos = self.pick_pos if self.pick_mode else -1
+
         if self.pick_mode:
             self.pick_pos += delta
         else:
@@ -1057,18 +1355,69 @@ class ConsoleWindow:
         if self.body_base < self.rows:
             ind_pos = 0 if self.pick_mode else self._scroll_indicator_row()
             if self.pick_mode:
+                # First, get abut range from the PREVIOUS pick position (before delta was applied)
+                abut_range = None
+                if 0 <= old_pick_pos < len(self.body.contexts):
+                    old_ctx = self.body.contexts[old_pick_pos]
+                    if old_ctx and hasattr(old_ctx, 'abut'):
+                        cooked = self._cook_abut(old_ctx.abut)
+                        if cooked:
+                            before, after = cooked
+                            # Calculate the valid line range based on old position
+                            min_line = max(0, old_pick_pos + before)
+                            max_line = min(self.body.row_cnt - 1, old_pick_pos + after)
+                            abut_range = (min_line, max_line)
+
+                # Clamp pick_pos to valid bounds
                 self.pick_pos = max(self.pick_pos, 0)
                 self.pick_pos = min(self.pick_pos, self.body.row_cnt-1)
+
+                # If abut range exists, further constrain pick_pos within that range
+                if abut_range:
+                    min_line, max_line = abut_range
+                    self.pick_pos = max(self.pick_pos, min_line)
+                    self.pick_pos = min(self.pick_pos, max_line)
+
                 if self.pick_pos >= 0:
                     self.pick_pos -= (self.pick_pos % self.pick_size)
+
+                # Re-check for abut in the CURRENT pick position for scroll adjustment
+                ctx = self.get_picked_context()
+                abut_range = None
+                if ctx and hasattr(ctx, 'abut'):
+                    cooked = self._cook_abut(ctx.abut)
+                    if cooked:
+                        before, after = cooked
+                        # Calculate the valid line range: [min_line, max_line]
+                        min_line = max(0, self.pick_pos + before)
+                        max_line = min(self.body.row_cnt - 1, self.pick_pos + after)
+                        abut_range = (min_line, max_line)
+
                 if self.pick_pos < 0:
                     self.scroll_pos = 0
+                elif abut_range:
+                    # Apply abut constraints: "after trumps before"
+                    min_line, max_line = abut_range
+                    range_size = max_line - min_line + 1
+
+                    if range_size <= self.scroll_view_size:
+                        # Entire range fits: show it all, starting from min_line
+                        self.scroll_pos = min_line
+                    else:
+                        # Range doesn't fit: prioritize "after" by putting picked line at top
+                        self.scroll_pos = self.pick_pos
+                        # But ensure we don't show lines above min_line
+                        self.scroll_pos = max(self.scroll_pos, min_line)
+                        # And ensure we don't show lines beyond max_line
+                        max_scroll = max_line - self.scroll_view_size + 1
+                        self.scroll_pos = min(self.scroll_pos, max_scroll)
                 elif self.scroll_pos > self.pick_pos:
                     # light position is below body bottom
                     self.scroll_pos = self.pick_pos
                 elif self.scroll_pos < self.pick_pos - (self.scroll_view_size - self.pick_size):
                     # light position is above body top
                     self.scroll_pos = self.pick_pos - (self.scroll_view_size - self.pick_size)
+
                 self.scroll_pos = max(self.scroll_pos, 0)
                 self.scroll_pos = min(self.scroll_pos, self.max_scroll_pos)
                 indent = 1
@@ -1697,9 +2046,12 @@ class ConsoleWindow:
             self.fix_positions()
 
             if pos != was_pos:
-                self.render()
                 if self.opts.return_if_pos_change:
+                    # Don't render with stale content; return immediately to allow full redraw
                     return None
+                else:
+                    # Only render here if we're not going to redraw immediately
+                    self.render()
         return None
 
 # =============================================================================
@@ -2248,6 +2600,15 @@ class ScreenStack:
         for option_ns in spinner.options:
             if option_ns.genre == 'action':
                 action_name = option_ns.attr
+
+                # Check if this action is scoped to the current screen
+                if hasattr(option_ns, 'effective_scope'):
+                    if self.curr.num not in option_ns.effective_scope:
+                        # This action is not valid for the current screen - skip it
+                        # But still clear the flag if it was set
+                        if hasattr(option_ns.obj, action_name):
+                            setattr(option_ns.obj, action_name, False)
+                        continue
 
                 # Check if this action flag is set
                 if hasattr(option_ns.obj, action_name):
