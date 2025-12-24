@@ -168,7 +168,7 @@ Combining everything we've discussed, here is your high-value pitch:
 # pylint: disable=too-many-return-statements,too-many-statements
 # pylint: disable=consider-using-in,too-many-nested-blocks
 # pylint: disable=wrong-import-position,disable=wrong-import-order
-# pylint: disable=line-too-long,protected-access
+# pylint: disable=line-too-long,protected-access,invalid-name
 
 import os
 import sys
@@ -189,7 +189,21 @@ HOME_ST, HELP_ST = 0, 1
 SCREENS = ['HOME', 'HELP']
 
 
-class HomeScreen(Screen):
+class VappmanScreen(Screen):
+    """ Base class for all VappmanScreens"""
+    def quit_ACTION(self):
+        """ TBD """
+        self.win.stop_curses()
+        os.system('clear; stty sane')
+        sys.exit(0)
+
+    def help_ACTION(self):
+        """ TBD """
+        app, win = self.app, self.app.win
+        app.ss.push(HELP_ST, win.pick_pos)
+
+
+class HomeScreen(VappmanScreen):
     """Main home screen showing installed and available apps"""
 
     def draw_screen(self):
@@ -223,12 +237,112 @@ class HomeScreen(Screen):
             if appname not in app.installs and wanted(line[2:]):
                 win.add_body(line)
                 
+    def installed_run_appman(self, verb):
+        app = self.app
+        if app.pick_is_installed:
+            app.run_appman(verb, app.pick_app)
+            return None
+
     def remove_ACTION(self):
+        """ TBD """
+        return self.installed_run_appman('remove')
+
+    def update_ACTION(self):
+        """ TBD """
+        return self.installed_run_appman('update')
+
+    def backup_ACTION(self):
+        """ TBD """
+        return self.installed_run_appman('backup')
+
+    def overwrite_ACTION(self):
+        """ TBD """
+        self.installed_run_appman('overwrite')
+
+    def about_ACTION(self):
+        """ TBD """
+        app = self.app
+        return app.run_appman('about', app.pick_app)
+
+    def test_ACTION(self):
         """ TBD """
         app = self.app
         if app.pick_is_installed:
-            app.run_appman('remove', app.pick_app)
-            return None
+            app.launch_app(app.pick_app)
+    
+    def default_ACTION(self):
+        """ TBD """
+        if self.app.pick_is_installed:
+           return self.remove_ACTION()
+        return self.install_ACTION()
+
+    #################################
+    def install_ACTION(self):
+        """ TBD """
+        app = self.app
+        if not app.pick_is_installed:
+            app.run_appman('install', app.pick_app)
+
+    #################################
+    def reinstall_ACTION(self):
+        """ TBD """
+        return self.app.run_appman('reinstall')
+
+    def sync_ACTION(self):
+        """ TBD """
+        return self.app.run_appman('sync')
+
+    def clean_ACTION(self):
+        """ TBD """
+        return self.app.run_appman('clean')
+
+    def update_all_ACTION(self):
+        """ TBD """
+        return self.app.run_appman('update')
+
+    def reinstall_all_ACTION(self):
+        """ TBD """
+        return self.app.run_appman('reinstall')
+
+    #################################
+    def escape_ACTION(self):
+        """ TBD """
+        app = self.app
+        app.prev_filter = ''
+        app.filter = None
+        app.win.pick_pos = 0
+
+    def slash_ACTION(self):
+        """ TBD """
+        app = self.app
+        # pylint: disable=protected-access
+        start_filter = app.prev_filter
+        prefix = ''
+        while True:
+            pattern = app.win.answer(f'{prefix}Enter filter regex:',
+                                     seed=app.prev_filter)
+            if pattern is None:
+                app.prev_filter = start_filter
+                return None # they gave up
+            app.prev_filter = pattern
+            pattern.strip()
+            if not pattern:
+                app.filter = None
+                break
+            try:
+                if re.match(r'^[\-\w\s]*$', pattern):
+                    words = pattern.split()
+                    app.filter = re.compile(r'\b' + r'(|.*\b)'.join(words), re.IGNORECASE)
+                    break
+                app.filter = re.compile(pattern, re.IGNORECASE)
+                break
+            except Exception:
+                prefix = 'Bad regex: '
+        if start_filter != app.prev_filter: # when filter changes, move to top
+            app.win.pick_pos = 0
+
+        return None
+
 
 
 
@@ -239,30 +353,6 @@ class VappmanHelpScreen(BasicHelpScreen):
         """Draw help screen with extra vappman info"""
         # Call parent to show standard help
         super().draw_screen()
-
-        # Add vappman-specific help lines
-        lines = [
-            '',
-            'ALWAYS AVAILABLE:',
-            '   a - about (more info about app)',
-            '   s - sync (update appman itself)',
-            '   c - clean (remove unneeded files/folders)',
-            '   U - update ALL installed apps',
-            '   R - reinstall ALL apps w updated install script',
-            '   q or x - quit program (CTL-C disabled)',
-            '   / - filter apps by keywords or regex',
-            '   ESC = clear filter and jump to top',
-            '   ENTER = install, remove, or return from help',
-            'CONTEXT SENSITIVE:',
-            '   i - install uninstalled app',
-            '   r - remove installed app',
-            '   u - update installed app',
-            '   b - backup installed app',
-            '   o - overwrite app from its backup',
-            '   t - test by opening a terminal emulator and launching the app',
-        ]
-        for line in lines:
-            self.win.put_body(line)
 
 
 class Vappman:
@@ -275,24 +365,31 @@ class Vappman:
         Vappman.singleton = self
 
         spin = self.spin = OptionSpinner()
-        spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
-        spin.add_key('about', 'a - about (more info about app)', genre='action')
+        spin.add_key('quit', 'q,x - quit program (CTL-C disabled)',
+                     genre='action', keys='qx')
+        spin.add_key('help', '? - toggle help screen', genre='action')
+
         spin.add_key('sync', 's - sync (update appman itself)', genre='action')
         spin.add_key('clean', 'c - clean (remove unneeded files/folders)', genre='action')
         spin.add_key('update_all', 'U - update ALL installed apps', genre='action')
         spin.add_key('reinstall_all', 'R - reinstall ALL apps w updated install script', genre='action')
-        spin.add_key('quit', 'q or x - quit program (CTL-C disabled)', genre='action', keys='qx')
         spin.add_key('slash', '/ - filter apps by keywords or regex', genre='action')
-        spin.add_key('escape', 'ESC = clear filter and jump to top', genre='action', keys=27)
-        spin.add_key('install', 'i,ENTER - install uninstalled app', genre='action')
-        spin.add_key('remove', 'r,ENTER - remove installed app', genre='action')
-        spin.add_key('update', 'u - update installed app', genre='action')
+        spin.add_key('escape', 'ESC - clear filter and jump to top', genre='action', keys=27)
+
+        spin.add_key('install', 'i - install uninstalled app', genre='action')
+        spin.add_key('default', 'ENTER - install/uninstall app',
+                     genre='action', keys=[cs.KEY_ENTER, 10])
+        spin.add_key('remove', 'r - remove installed app', genre='action')
+        spin.add_key('about', 'a - about (more info about app)', genre='action')
+
         spin.add_key('backup', 'b - backup installed app', genre='action')
+        spin.add_key('update', 'u - update_installed app', genre='action')
         spin.add_key('overwrite', 'o - overwrite app from its backup', genre='action')
         spin.add_key('test', 't - test (open a terminal and run app', genre='action')
 
+
         # EXPAND
-        other_keys = set([cs.KEY_ENTER, 10])
+        # other_keys = set([cs.KEY_ENTER, 10])
         # other_keys.add(27) # ESCAPE
         # other_keys.add(10) # another form of ENTER
         self.opts = spin.default_obj
@@ -311,9 +408,11 @@ class Vappman:
         win_opts.head_line=True
         win_opts.body_rows=len(self.apps)+20
         win_opts.head_rows = 10
-        win_opts.keys = spin.keys ^ other_keys
+        win_opts.keys = spin.keys
         win_opts.mod_pick = self.mod_pick
         win_opts.pick_attr = cs.A_BOLD|cs.A_UNDERLINE
+        win_opts.dialog_abort = True
+        win_opts.ctrl_c_terminates = False
         self.win = ConsoleWindow(win_opts)
         self.has_am = None
 
@@ -505,16 +604,26 @@ class Vappman:
 #                   self.handle_escape()
 
                 # Handle help mode navigation
-                if self.opts.help_mode:
-                    if self.ss.curr.num != HELP_ST:
-                        self.navigate_to(HELP_ST)
-                else:
-                    if self.ss.curr.num == HELP_ST:
-                        self.navigate_back()
+#               if self.opts.help_mode:
+#                   if self.ss.curr.num != HELP_ST:
+#                       self.navigate_to(HELP_ST)
+#               else:
+#                   if self.ss.curr.num == HELP_ST:
+#                       self.navigate_back()
 
                 # Delegate key handling to old do_key for now
                 # (will refactor actions to screen classes later)
-                self.do_key(key)
+#           if key == cs.KEY_ENTER or key == 10: # Handle ENTER
+#               if self.opts.help_mode:
+#                   self.opts.help_mode = False
+#                   return True
+
+                if key in self.spin.keys:
+                    _ = self.spin.do_key(key, self.win)
+                    # return value
+
+                # Actions delegated to screen classes - automatically handled
+                self.ss.perform_actions(self.spin)
 
             win.clear()
 
@@ -717,100 +826,9 @@ class Vappman:
             message = ' '.join([f'Cannot launch {app}'] + failures)
             self.win.alert(message=message)
 
-        self.launch_app(self.pick_app)
-
     def do_key(self, key):
         """ TBD """
-        if not key:
-            return True
-        if key == cs.KEY_ENTER or key == 10: # Handle ENTER
-            if self.opts.help_mode:
-                self.opts.help_mode = False
-                return True
-            if self.pick_is_installed:
-                key = ord('r') # remove installed app
-            else:
-                key = ord('i') # install uninstalled app
 
-        if key in self.spin.keys:
-            value = self.spin.do_key(key, self.win)
-            # return value
-
-        # Actions delegated to screen classes
-        screen_actions = [
-            'remove',
-        ]
-        current_screen = self.screens[self.ss.curr.num]
-        for action in screen_actions:
-            if self.ss.act_in(action):
-                current_screen.handle_action(action)
-
-        if key == 27: # ESCAPE
-            self.prev_filter = ''
-            self.filter = None
-            self.win.pick_pos = 0
-            return None
-
-        if key in (ord('q'), ord('x')):
-            self.win.stop_curses()
-            os.system('clear; stty sane')
-            sys.exit(0)
-
-        if key == ord('i') and not self.pick_is_installed:
-            self.run_appman('install', self.pick_app)
-            return None
-
-        if key == ord('t') and self.pick_is_installed:
-            self.launch_app(self.pick_app)
-            return None
-
-        if key == ord('s'):
-            self.run_appman('sync')
-        if key == ord('c'):
-            self.run_appman('clean')
-        if key == ord('b'):
-            self.run_appman('backup', self.pick_app)
-        if key == ord('o'):
-            self.run_appman('overwrite', self.pick_app)
-        if key == ord('a'):
-            self.run_appman('about', self.pick_app)
-        if key == ord('u'):
-            self.run_appman('update', self.pick_app)
-        if key == ord('U'):
-            self.run_appman('update')
-        if key == ord('R'):
-            self.run_appman('reinstall')
-        # EXPAND
-
-        if key == ord('/'):
-            # pylint: disable=protected-access
-            start_filter = self.prev_filter
-
-            prefix = ''
-            while True:
-                pattern = self.win.answer(f'{prefix}Enter filter regex:', seed=self.prev_filter)
-                self.prev_filter = pattern
-
-                pattern.strip()
-                if not pattern:
-                    self.filter = None
-                    break
-
-                try:
-                    if re.match(r'^[\-\w\s]*$', pattern):
-                        words = pattern.split()
-                        self.filter = re.compile(r'\b' + r'(|.*\b)'.join(words), re.IGNORECASE)
-                        break
-                    self.filter = re.compile(pattern, re.IGNORECASE)
-                    break
-                except Exception:
-                    prefix = 'Bad regex: '
-
-            if start_filter != self.prev_filter:
-                # when filter changes, move to top
-                self.win.pick_pos = 0
-
-            return None
         return None
 
 

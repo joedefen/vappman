@@ -323,7 +323,7 @@ class OptionSpinner:
         if keys:
             keys = list(keys) if isinstance(keys, (list, tuple, set)) else [keys]
             ns.keys = []
-            for key in ns.keys:
+            for key in keys:
                 if isinstance(key, str):
                     for stroke in key:
                         ns.keys.append(ord(stroke))
@@ -1917,6 +1917,40 @@ class Screen:
         """
         return True
 
+    def get_spinner(self):
+        """
+        Find and return the OptionSpinner instance from the app.
+
+        Searches through the app's attributes to find an OptionSpinner instance.
+        Caches the result for performance.
+
+        Returns:
+            OptionSpinner: The spinner instance, or None if not found
+
+        Example:
+            spinner = self.get_spinner()
+            if spinner:
+                spinner.show_help_nav_keys(self.win)
+        """
+        # Check if we've already cached the spinner
+        if hasattr(self, '_cached_spinner'):
+            return self._cached_spinner
+
+        # Search through app's attributes for an OptionSpinner instance
+        for attr_name in dir(self.app):
+            if not attr_name.startswith('_'):  # Skip private attributes
+                try:
+                    attr_value = getattr(self.app, attr_name)
+                    if isinstance(attr_value, OptionSpinner):
+                        self._cached_spinner = attr_value
+                        return attr_value
+                except (AttributeError, TypeError):
+                    continue
+
+        # Cache None if not found to avoid repeated searches
+        self._cached_spinner = None
+        return None
+
     def handle_action(self, action_name):
         """
         Dispatch action to screen-specific handler method.
@@ -2171,6 +2205,67 @@ class ScreenStack:
         setattr(self.obj, action, False)
         return val and (screens is None or self.is_curr(screens))
 
+    def perform_actions(self, spinner):
+        """
+        Automatically handle all pending actions for the current screen.
+
+        This method iterates through ALL action options from the OptionSpinner,
+        clears any set flags, and calls the corresponding *_ACTION method if it
+        exists on the current screen.
+
+        IMPORTANT: This clears ALL action flags, even if the current screen doesn't
+        have a handler. This prevents actions from having delayed/unexpected effects
+        when navigating between screens.
+
+        Args:
+            spinner (OptionSpinner): The OptionSpinner instance containing action definitions
+
+        Returns:
+            int: Number of actions that were performed (called handlers)
+
+        Example:
+            # In your main loop (replaces manual action checking):
+            while True:
+                self.screens[screen_num].draw_screen()
+                self.win.render()
+                key = self.win.prompt()
+                if key:
+                    self.spinner.do_key(key, self.win)
+                    self.ss.perform_actions(self.spinner)  # Handles all actions automatically
+
+            # Old way (what this replaces):
+            for action in ['quit', 'help', 'save', 'load']:
+                if self.ss.act_in(action):
+                    current_screen.handle_action(action)
+        """
+        current_screen = self.screen_objects.get(self.curr.num)
+        if not current_screen:
+            return 0  # No screen object to handle actions
+
+        actions_performed = 0
+
+        # Loop through ALL action options from the spinner
+        for option_ns in spinner.options:
+            if option_ns.genre == 'action':
+                action_name = option_ns.attr
+
+                # Check if this action flag is set
+                if hasattr(option_ns.obj, action_name):
+                    action_value = getattr(option_ns.obj, action_name, False)
+
+                    # ALWAYS clear the flag (prevents delayed/unexpected effects)
+                    setattr(option_ns.obj, action_name, False)
+
+                    # Only call the handler if the flag was set AND the method exists
+                    if action_value:
+                        method_name = f'{action_name}_ACTION'
+                        method = getattr(current_screen, method_name, None)
+                        if method and callable(method):
+                            method()
+                            actions_performed += 1
+
+        return actions_performed
+
 
 # Application-level helper methods for screen navigation
 # ======================================================
@@ -2228,10 +2323,12 @@ class BasicHelpScreen(Screen):
         1. Navigation keys blurb (from OptionSpinner.show_help_nav_keys)
         2. Application options help (from OptionSpinner.show_help_body)
         """
-        app, win = self.app, self.win
+        win = self.win
         self.win.set_pick_mode(False)
-        app.spinner.show_help_nav_keys(win)
-        app.spinner.show_help_body(win)
+        spinner = self.get_spinner()
+        if spinner:
+            spinner.show_help_nav_keys(win)
+            spinner.show_help_body(win)
 
 
 if __name__ == '__main__':
