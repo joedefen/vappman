@@ -6,8 +6,8 @@ from typing import NamedTuple, Optional, List
 
 class AppLocation(NamedTuple):
     """ Helper to describing where an app is """
-    path: Path  # Path to storage dir or None
-    scope: str  # System User None
+    sys_path: Path  # Path to system storage dir or None
+    usr_path: Path  # Path to user storage dir or None
 
 class AppmanVars:
     """ Encapuslates the places / functions we need to know
@@ -20,10 +20,13 @@ class AppmanVars:
         self.snapshot_base = Path.home() / ".am.snapshots"
         self.user_app_dir = self._find_user_app_dir()
 
-    @property
     def is_user_mode(self) -> bool:
         """Returns True if appman-mode file exists."""
         return self._mode_file.exists()
+
+    def is_system_mode(self) -> bool:
+        """Returns True if appman-mode file exists."""
+        return not self.is_user_mode()
 
     def set_system_mode(self, enable: bool):
         """Sets the mode by creating or removing the appman-mode file."""
@@ -84,12 +87,14 @@ class AppmanVars:
 
     def where_is(self, app_name: str) -> Optional[AppLocation]:
         """Checks both user and system directories for a specific app folder."""
+        usr_path, sys_path = None, None
         if self.user_app_dir:
-            user_path = self.user_app_dir / app_name
-            if user_path.exists():
-                return AppLocation(path=user_path, scope="User")
+            tmp = self.user_app_dir / app_name
+            if tmp.exists():
+                usr_path = tmp
 
-        sys_path = self.system_app_dir / app_name
-        if sys_path.exists():
-            return AppLocation(path=sys_path, scope="Sys")
-        return None
+        tmp = self.system_app_dir / app_name
+        if tmp.exists():
+            sys_path = tmp
+
+        return AppLocation(usr_path=usr_path, sys_path=sys_path)

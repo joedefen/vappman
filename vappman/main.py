@@ -11,149 +11,6 @@ TODOs:
 -   Snapshots	    -b, -o	        Partially (Manual)	High (Safety)
 -   Icon Theme      Sync	--icons	Missing	        Low (Aesthetics)
 
-*   One-command setup: Don't have appman (or am)? vappman will now set it up for you.
-    -If a user runs vappman and appman isn't found, offering to install it
-     (and its core dependencies like curl, zsync, etc.) removes the
-     biggest barrier to entry.
-    - The Pitch: "Experience 2500+ Linux apps with zero setup—vappman now bootstraps
-      your entire AppImage management environment."
-
-*   Security First: Integrated sandboxing support—run untrusted apps in a click.
-    - appman has built-in support for sandboxing via the -ias or --sandbox flags
-      (often using Firejail).
-    - High Value: Add a b (for "Box") or S (for "Sandbox") key.
-    - Why? Security is the #1 concern for AppImage users. A TUI that lets you
-      "Search -> Highlight -> Install with Sandbox" is a power-user's dream.
-
-*   More than AppImages: Full support for the NeoDB ecosystem (Soarpkgs, AppBundles).
-    - The current appman help shows it's no longer just for standard AppImages. It now handles:
-    - Soarpkgs: High-performance static binaries.
-    - AppBundles: PELF-based portable apps.
-    - Python AppImages: Side-by-side Python versions.
-    - The Feature: Add a "Repo Toggle" or a "Global Search" (using appman -q --all)
-      so users can discover these formats without needing to know the CLI flags.
-*   Safe Updates: One-key snapshots and rollbacks.
-    appman supports -b (backup) and --rollback (downgrade).
-    - The Feature: In the "Installed Apps" view, let users hit B to take a snapshot or
-      L (Legacy/List) to see available rollbacks for that specific app.
-    - Why? This is the "Time Machine" for Linux apps. If an update breaks a tool,
-      vappman could be the easiest way to fix it.
-* 5. Metadata & "About" Integration
-    - Your README mentions vappman covers (-a) about, but making this instant is key.
-    - Improvement: A side-pane or a toggleable window that shows the appman -a info for
-      the currently highlighted app before the user even hits a key to install.
----
-      
-Based on the ivan-hc/AM repository and recent updates, there is a very clear distinction—and a significant
-branding shift—that provides you with the perfect "excuse" for a vappman revamp.
-1. The Core Issue: AM vs. AppMan
-
-The developer has effectively merged the logic into a single codebase, but uses two different "entry points" depending on user privilege:
- * am (The Flagship): Intended for users with root/sudo access.
-   It installs apps system-wide (e.g., in /opt) by default.
- * appman (The Rootless Side): A "portable" version of the same script.
-   If you rename the main APP-MANAGER script to appman, it automatically switches to "AppMan mode,"
-   installing everything locally in $HOME without requiring sudo.
-
-The "Revamp" Opportunity: Currently, vappman is hardcoded to look for appman.
-  - If a user has installed the full am suite, vappman might not even "see" it or work with it properly.
-
-2. Does it make sense to change? Yes.
-
-   -To stay relevant with Ivan-HC’s ecosystem, vappman should transition from being a "wrapper for AppMan" to a "TUI for AM/AppMan."
-
-The "High Value" Roadmap for your Re-announcement:
-
-  - Auto-Detection & Support for am: vappman should check for am first, then appman. If am is present,
-    it should use it (perhaps adding a toggle for --user mode). This broadens your user base to everyone using the main AM project.
-
-  - The "Bootstrap" Installer: Since Ivan-HC now provides a unified AM-INSTALLER script,
-    vappman can offer to run it if neither is found. This makes vappman a "zero-dependency" entry point for new users.
-
-  - Sandboxing Integration (Version 9+ Feature): The latest AM (v9.3+) now supports sandboxing
-    during installation in one go. Adding a "Secure Install" key (using -ias) in vappman is a major
-    feature that aligns with the current development of the backend.
-
-  - Snapshot Management: AM has introduced named snapshots (v8.4). vappman could allow users to manage
-    these backups visually, which is much more intuitive than the CLI.
-
-Suggested Re-announcement Pitch: "The AM/AppMan Unified Interface"
-   - Headline: Re-introducing vappman: Now a complete TUI for the "AM" Application Manager ecosystem.
-   - The Narrative: " I’ve rebuilt vappman to be the ultimate visual dashboard for both. Whether you’re a
-      power user installing system-wide with am or a local user with appman, vappman now handles the heavy lifting."
-
-New Feature Highlights:
-    - Dual-Engine Support: Automatically detects and works with either am or appman.
-    - One-Click Sandboxing: Leverage the new AM 9.3+ sandboxing features directly from the TUI.
-    - Visual Snapshots: Manage your app backups and rollbacks without memorizing CLI flags.
-    - The 'Zero-to-App' Experience: If you don't have the backend installed,
-      vappman will now bootstrap the official AM-INSTALLER for you.
-
-    Why this works: It stops being "just another tool" and starts being the "Official-feeling TUI"
-    for a very active and popular project. It solves the confusion between am and appman for the user by abstracting it away.
-
-    
-That testing hurdle is actually a common "developer’s trap." You’re trying to test two distinct system states on one machine, which leads to "configuration drift"—where your tests for `appman` start failing because `am` left a file in `/opt` or vice versa.
-
-The good news is that because the `APP-MANAGER` script is now unified, you can "spoof" the environments without actually needing two machines or deep system changes.
-
----
-
-### 1. The "Poor Man's" Sandbox: Binary Aliasing
-
-Since the backend script behaves differently based on its **filename**, you can test the logic on one system by simply creating two symlinks to the same source script in a local testing directory.
-
-1. Download the master script: `wget https://raw.githubusercontent.com/ivan-hc/AM/main/APP-MANAGER`
-2. Create two symlinks:
-* `ln -s APP-MANAGER am`
-* `ln -s APP-MANAGER appman`
-
-
-3. **The Trick:** Modify your `vappman` test environment to point its `$PATH` to this local folder first. You can then toggle which one `vappman` "sees" by just deleting/renaming the symlinks.
-
-### 2. The Professional Fix: Containerization (Distrobox)
-
-If you want to be 100% sure without messing up your host, use **Distrobox**. It is a tool that lets you run any Linux distro inside your terminal with full access to your home directory, but a separate system area (`/opt`, `/usr/bin`).
-
-* **Setup:** Create two containers:
-* `distrobox create -n am-test --image fedora`
-* `distrobox create -n appman-test --image fedora`
-
-
-* **Workflow:**
-* In `am-test`, run the `AM` installer (System mode).
-* In `appman-test`, run the `AppMan` installer (User mode).
-
-
-* **Why this wins:** You can have two terminal tabs open simultaneously—one acting as a "System Mode" machine and one as a "User Mode" machine. You just run `vappman` inside them, and they will behave exactly like real-world installs.
-
-### 3. Spoofing via Environment Variables
-
-If you want to automate your testing, you can add a "Debug Mode" to `vappman` that overrides the discovery logic.
-
-```python
-# Pseudo-code for your vappman overhaul
-VAPPMAN_FORCE_MODE = os.getenv("VAPPMAN_TEST_MODE") # 'am' or 'appman'
-
-if VAPPMAN_FORCE_MODE == 'am':
-    active_manager = "am"
-    needs_sudo = True
-elif VAPPMAN_FORCE_MODE == 'appman':
-    active_manager = "appman"
-    needs_sudo = False
-else:
-    # ... your normal auto-discovery logic
-
-```
-
-This lets you test both code paths by just running `VAPPMAN_TEST_MODE=am vappman`.
-
----
-
-### The Final "Excuse" for the Re-Announcement
-
-Combining everything we've discussed, here is your high-value pitch:
-
 **"vappman 1.0: The Bridge to the Unified AM Ecosystem"**
 
 * **Intelligent Auto-Discovery:** No more manual configuration. `vappman` automatically detects if you're using `am` (System) or `appman` (User) and adapts the UI.
@@ -173,7 +30,6 @@ Combining everything we've discussed, here is your high-value pitch:
 import os
 import sys
 import re
-import glob
 import shutil
 import shlex
 import subprocess
@@ -185,291 +41,13 @@ from .ConsoleWindow import (
     Screen, ScreenStack, BasicHelpScreen, Context
 )
 from .PersistentState import PersistentState
+from .AppmanVars import AppmanVars, AppLocation
+from .AppmanLauncher import AppmanLauncher
+from .Prerequisites import Prerequisites
 
 # Screen constants
 HOME_ST, HELP_ST = 0, 1
 SCREENS = ['HOME', 'HELP']
-
-class Prerequisites:
-    """ Detect / install prereqs """
-    def __init__(self):
-        self.has_am = False
-        self.has_appman = False
-
-    def detect_package_manager(self):
-        """
-        Detect the system's package manager.
-
-        Returns:
-            tuple: (package_manager_name, install_command_template)
-                   or (None, None) if unsupported
-        """
-        # Check for various package managers in order of preference
-        pkg_managers = [
-            ('apt', 'sudo apt-get update && sudo apt-get install -y {packages}'),
-            ('dnf', 'sudo dnf install -y {packages}'),
-            ('yum', 'sudo yum install -y {packages}'),
-            ('pacman', 'sudo pacman -S --noconfirm {packages}'),
-            ('zypper', 'sudo zypper install -y {packages}'),
-            ('emerge', 'sudo emerge {packages}'),
-            ('apk', 'sudo apk add {packages}'),
-        ]
-
-        for pm_name, cmd_template in pkg_managers:
-            if shutil.which(pm_name):
-                return (pm_name, cmd_template)
-
-        return (None, None)
-
-    def install_dependencies(self, missing):
-        """
-        Offer to install missing dependencies using the system package manager.
-
-        Args:
-            missing (set): Set of missing program names
-
-        Returns:
-            bool: True if installation succeeded or user declined, False on error
-        """
-        if not missing:
-            return True
-
-        pm_name, install_cmd_template = self.detect_package_manager()
-
-        if not pm_name:
-            print(f'\nERROR: Cannot find supported package manager.')
-            print(f'Missing dependencies: {", ".join(sorted(missing))}')
-            print('Please install them manually using your system package manager.')
-            return False
-
-        # Map common program names to package names for different distros
-        # Some programs have different package names on different distros
-        package_map = {
-            'curl': 'curl',
-            'grep': 'grep',
-            'jq': 'jq',
-            'sed': 'sed',
-            'wget': 'wget',
-        }
-
-        packages = [package_map.get(prog, prog) for prog in missing]
-
-        print(f'\n⚠️  Missing dependencies: {", ".join(sorted(missing))}')
-        print(f'\nDetected package manager: {pm_name}')
-
-        response = input(f'\nInstall missing dependencies? [y/N]: ').strip().lower()
-
-        if response not in ('y', 'yes'):
-            print('Installation cancelled.')
-            return False
-
-        # Build and execute the install command
-        install_cmd = install_cmd_template.format(packages=' '.join(packages))
-        print(f'\nRunning: {install_cmd}')
-
-        try:
-            result = subprocess.run(install_cmd, shell=True, check=False)
-            if result.returncode != 0:
-                print(f'\n❌ Installation failed with exit code {result.returncode}')
-                return False
-            print(f'\n✅ Dependencies installed successfully!')
-            return True
-        except Exception as exc:
-            print(f'\n❌ Installation failed: {exc}')
-            return False
-
-    def install_am_appman(self):
-        """
-        Offer to install AM/appman using the official installer.
-
-        Returns:
-            bool: True if installation succeeded or user declined, False on error
-        """
-        print('\n⚠️  AM/appman is not installed.')
-        print('\nAM is a powerful AppImage package manager that allows you to:')
-        print('  • Install and manage 2500+ AppImages, Soarpkgs, and AppBundles')
-        print('  • Update apps with a single command')
-        print('  • Sandbox untrusted applications')
-        print('  • Create snapshots and rollbacks')
-
-        response = input('\nInstall AM/appman now? [y/N]: ').strip().lower()
-
-        if response not in ('y', 'yes'):
-            print('Installation cancelled.')
-            return False
-
-        # Check if wget or curl is available
-        if not shutil.which('wget'):
-            print('\n❌ wget is required to download the AM installer.')
-            print('Please install wget first.')
-            return False
-
-        installer_url = 'https://raw.githubusercontent.com/ivan-hc/AM/main/AM-INSTALLER'
-        install_cmd = (
-            f'wget -q {installer_url} && '
-            f'chmod a+x ./AM-INSTALLER && '
-            f'./AM-INSTALLER && '
-            f'rm ./AM-INSTALLER'
-        )
-
-        print(f'\nRunning: {install_cmd}')
-
-        try:
-            result = subprocess.run(install_cmd, shell=True, check=False)
-            if result.returncode != 0:
-                print(f'\n❌ AM installation failed with exit code {result.returncode}')
-                return False
-            print(f'\n✅ AM/appman installed successfully!')
-            return True
-        except Exception as exc:
-            print(f'\n❌ AM installation failed: {exc}')
-            return False
-
-    def check_preqreqs(self):
-        """
-        Check that needed programs are installed.
-        Offers to install missing dependencies and AM/appman if not found.
-        """
-        print('Checking prerequisites...')
-
-        missing = set()
-        self.has_am = bool(shutil.which('am') is not None)
-        self.has_appman = bool(shutil.which('appman') is not None)
-
-        for prog in 'curl grep jq sed wget'.split():
-            if shutil.which(prog) is None:
-                missing.add(prog)
-
-        # Handle missing dependencies
-        if missing:
-            if not self.install_dependencies(missing):
-                print('\n❌ Cannot proceed without required dependencies.')
-                sys.exit(1)
-
-            # Verify installation
-            still_missing = set()
-            for prog in missing:
-                if shutil.which(prog) is None:
-                    still_missing.add(prog)
-
-            if still_missing:
-                print(f'\n❌ Still missing after installation: {", ".join(sorted(still_missing))}')
-                sys.exit(1)
-
-        # Handle missing AM/appman
-        if not self.has_am and not self.has_appman:
-            if not self.install_am_appman():
-                print('\n❌ Cannot proceed without AM/appman.')
-                print('\nManual installation instructions:')
-                print('  wget -q https://raw.githubusercontent.com/ivan-hc/AM/main/AM-INSTALLER')
-                print('  chmod a+x ./AM-INSTALLER')
-                print('  ./AM-INSTALLER')
-                print('  rm ./AM-INSTALLER')
-                sys.exit(1)
-
-            # After successful installation, exit so user can restart vappman
-            print('\n✅ Installation complete!')
-            print('\nPlease restart vappman to begin using it.')
-            sys.exit(0)
-
-        print('✅ All prerequisites satisfied.')
-
-    def cmd_dict(self, cmd, start=r'\s*◆\s'):
-        """ Get lines with the given start put into a dict keyed by the
-            1st word.
-        """
-        def parse_app_list(lines):
-            def shorten(raw_type):
-                TYPE_MAP = {
-                    "appimage": "AppI",
-                    "dynamic-binary": "DyBi",
-                    "static-binary": "StBi",
-                    "bash-script": "Bash",
-                    "python-script": "Pyth",
-                }
-
-                # Strip the libfuse2 '*' if present
-                clean_type = raw_type.lower().rstrip('*')
-                # Return mapped value or first 4 chars if unknown
-                return TYPE_MAP.get(clean_type, clean_type[:4].capitalize())
-
-            apps = {}
-            current_global = False
-            
-            # Process line by line
-            # lines = input_text.strip().split('\n')
-            
-            for line in lines:
-                line = line.strip()
-                
-                # Determine context (Global vs Local)
-                if 'BY "AM"' in line:
-                    current_global = True
-                    continue
-                elif 'AS "APPMAN"' in line:
-                    current_global = False
-                    continue
-                    
-                # Identify data lines (they start with the diamond symbol ◆)
-                if line.startswith('◆'):
-                    # Remove the symbol and split by pipe '|'
-                    # We strip whitespace and also remove the '*' indicator for libfuse2
-                    parts = [p.strip().rstrip('*') for p in line[1:].split('|')]
-                    
-                    if len(parts) >= 3:
-                        name = parts[0]
-                        version = parts[1]
-                        app_type = parts[2]
-                        
-                        # Store as a SimpleNamespace for dot-notation access
-                        apps[name] = SimpleNamespace(
-                                        version=version,
-                                        app_type=shorten(app_type),
-                                        global_status=current_global,
-                                        synopsis=None,
-                                        raw=line
-                                    )
-                    else:
-                        mat = re.match(r'\s*([^\s]+)\s+:\s+([^\s].*)', line[1:])
-                        if mat:
-                            apps[mat.group(1)] = SimpleNamespace(
-                                                    version=None,
-                                                    app_type=None,
-                                                    global_status=None,
-                                                    synopsis=mat.group(2),
-                                                    raw=line
-                                                )
-                        
-            return apps
-        # Define the command to run
-        command = ['appman' if self.has_appman else 'am']
-        command += cmd.split()
-        # Run the command and capture the output
-        try:
-            # Capture as bytes first, then decode with error handling
-            result = subprocess.run(command, stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE, check=False)
-        except Exception as exc:
-            ConsoleWindow.stop_curses()
-            print(f'FAILED: {command}: {exc}')
-            sys.exit(1)
-
-        if result.returncode != 0:
-            print(f'WARNING: {command}: {result.returncode=}')
-
-        # Decode with multiple fallback strategies
-        try:
-            output = result.stdout.decode('utf-8', errors='replace')
-        except Exception:
-            try:
-                output = result.stdout.decode('latin-1', errors='replace')
-            except Exception:
-                output = str(result.stdout, errors='replace')
-
-        lines = output.splitlines()
-        # ansi_escape_pattern = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
-        rv = parse_app_list(lines)
-        return rv
 
 class VappmanScreen(Screen):
     """ Base class for all VappmanScreens"""
@@ -496,22 +74,15 @@ class HomeScreen(VappmanScreen):
         def wanted(line):
             return not app.filter or app.filter.search(line)
 
-        def version_of(appname):
-            # ◆  krita      |  5.2.2   |  appimage-type2  |  355   MiB
-            fields = app.installs[appname].split('|')
-            if len(fields) >= 2:
-                return fields[1].strip()
-            return '?version?'
-
         win.set_pick_mode(True)
         win.set_demo_mode(app.opts.demo_mode)
 
         title = "APPMAN"
         if not app.has_appman:
-            title = "AM-SYSTEM" if app.opts.in_system_mode else 'AM-USER'
-            if app.disk_state.in_system_mode != app.opts.in_system_mode:
-                app.disk_state.in_system_mode = app.opts.in_system_mode
-                app.disk_state.save()
+            title = "S:AM-SYSTEM" if app.opts.in_system_mode else 'S:AM-USER'
+            if app.appman.is_system_mode() != app.opts.in_system_mode:
+                app.appman.set_system_mode(app.opts.in_system_mode)
+                app.installs = app.get_installed()
         if app.disk_state.max_backups != app.opts.max_backups:
             app.disk_state.max_backups = app.opts.max_backups
             app.disk_state.save()
@@ -520,15 +91,18 @@ class HomeScreen(VappmanScreen):
         # Show installed apps first
         idx = 0
         for appname, ns in app.installs.items():
-            ns2 = app.apps[appname] if appname in app.apps else None
+            ns2 = app.apps.get(appname, None)
             if ns2 and wanted(ns.raw[2:]):
-                where = "S" if ns.global_status else "u"
-                checks = f'✔⋅{where}'
-                app_ver = f'{appname} [{ns.version}]  '
+                where = "S" if 'S' in ns.where else "⋅"
+                where += "U" if 'U' in ns.where else "⋅"
+                checks = f'✔{where}'
+                pad = 30 - len(f'{appname} {ns.version}')
                 fill = '⋅' if idx % 3 == 1 else ''
+                app_ver = f'{appname}   {"":{fill}>{pad}} {ns.version}'
                 idx += 1
-                line = f'{checks} {ns.app_type:<4} ⋅ {app_ver:{fill}<30} : {ns2.synopsis}'
-                win.add_body(line, context=Context("installed", app=appname, ver=ns.version))
+                line = f'{checks} {ns.app_type:<4} ⋅ {app_ver}  {ns2.synopsis}'
+                status = "installed" if app.opts.in_system_mode or 'U' in where else "uninstalled"
+                win.add_body(line, context=Context(status, app=appname, ver=ns.version))
 
         # Then show available (not installed) apps
         for appname, ns in app.apps.items():
@@ -549,11 +123,13 @@ class HomeScreen(VappmanScreen):
         # Get base header line and combine with dynamic actions
         header2, context = '', self.win.get_picked_context()
         if context:
+            mode = 'Sys' if app.opts.in_system_mode else 'Usr'
+            header2 = f' #:maxBkUp={app.opts.max_backups}   '
             if context.genre == 'installed':
-                header2 = ' [r]mv [u]pd [b]kup [o]verwr [t]est'
+                header2 += ' [r]mv [u]pd [b]kup [o]verwr [t]est'
             elif context.genre == 'uninstalled':
-                header2 = ' [i]nstall'
-            header2 += f' [a]bout #:maxBkUp={app.opts.max_backups}'
+                header2 += ' [i]nstall'
+            header2 += f' [a]bout'
         
         win.add_fancy_header(header2, app.opts.fancy_header)
                 
@@ -694,15 +270,15 @@ class Vappman(Prerequisites):
         self.check_preqreqs()
         print(f'{self.has_am=}')
         print(f'{self.has_appman=}')
-        self.disk_state = PersistentState('vappman', in_system_mode=False, max_backups=1)
+        self.disk_state = PersistentState('vappman', max_backups=1)
+        self.appman = AppmanVars()
+        self.launcher = AppmanLauncher()
 
         self.actions = {} # currently available actions
         self.prev_filter = '' # string
         self.filter = None # compiled pattern
         self.apps = self.cmd_dict('list')
         self.installs = self.get_installed() # dict keyed by app
-        self.appman_dir = self.get_appman_dir()
-        self.dot_desktop_dir = self.get_dot_desktop_dir()
         self.terminal_emulator = None
         self.has_am = None
 
@@ -734,7 +310,7 @@ class Vappman(Prerequisites):
         spin.add_key('demo_mode', '* - demo_mode', vals=[False, True])
         if not self.has_appman:
             spin.add_key('in_system_mode', 'S - AM system mode', vals=[False, True])
-            self.opts.in_system_mode = self.disk_state.in_system_mode
+            self.opts.in_system_mode = self.appman.is_system_mode()
         spin.add_key('max_backups', '# - max backups per app', vals=[1, 2, -1])
         self.opts.max_backups = self.disk_state.max_backups
 
@@ -761,56 +337,122 @@ class Vappman(Prerequisites):
         self.win.set_handled_keys(self.spin)
 
 
-    @staticmethod
-    def get_word1(line):
-        """ Get words[1] from a string (e.g. '◆  appname ...' -> 'appname'). """
-        words = line.split(maxsplit=3)
-        return '' if len(words) < 2 else words[1]
+    def cmd_dict(self, cmd, start=r'\s*◆\s'):
+        """ Get lines with the given start put into a dict keyed by the
+            1st word.
+        """
+        def parse_app_list(lines):
+            nonlocal current_in_user_mode
+            def shorten(raw_type):
+                TYPE_MAP = {
+                    "appimage": "AppI",
+                    "dynamic-binary": "DyBi",
+                    "static-binary": "StBi",
+                    "bash-script": "Bash",
+                    "python-script": "Pyth",
+                }
+
+                # Strip the libfuse2 '*' if present
+                clean_type = raw_type.lower().rstrip('*')
+                # Return mapped value or first 4 chars if unknown
+                return TYPE_MAP.get(clean_type, clean_type[:4].capitalize())
+
+            apps = {}
+            where = None
+            
+            # Process line by line
+            # lines = input_text.strip().split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                # Determine to reset location (Global vs Local)
+                if 'HAVE INSTALLED' in line:
+                    where = None # Cannot trust what is said
+                    
+                # Identify data lines (they start with the diamond symbol ◆)
+                if line.startswith('◆'):
+                    # Remove the symbol and split by pipe '|'
+                    # We strip whitespace and also remove the '*' indicator for libfuse2
+                    parts = [p.strip().rstrip('*') for p in line[1:].split('|')]
+                    
+                    if len(parts) >= 3:
+                        name = parts[0]
+                        version = parts[1]
+                        app_type = parts[2]
+                        location = self.appman.where_is(name)
+                        where = 'S' if location.sys_path else ''
+                        where += 'U' if location.usr_path else ''
+                        
+                        # Store as a SimpleNamespace for dot-notation access
+                        ns = apps.get(name, None)
+                        if ns:  # we have both user and system apps
+                            if current_in_user_mode:
+                                ns.version=version
+                        else:
+                            apps[name] = SimpleNamespace(
+                                            version=version,
+                                            app_type=shorten(app_type),
+                                            where=where,
+                                            synopsis=None,
+                                            raw=line
+                                        )
+                    else:
+                        mat = re.match(r'\s*([^\s]+)\s+:\s+([^\s].*)', line[1:])
+                        if mat:
+                            apps[mat.group(1)] = SimpleNamespace(
+                                                    version=None,
+                                                    app_type=None,
+                                                    where='',
+                                                    synopsis=mat.group(2),
+                                                    raw=line
+                                                )
+                        
+            return apps
+        # Define the command to run
+        command = ['appman' if self.has_appman else 'am']
+        command += cmd.split()
+        current_in_user_mode = None
+        if 'files' in cmd.split():
+            current_in_user_mode = self.appman.is_user_mode()
+            if current_in_user_mode is True:
+                # temp: promote to system mode to get all apps
+                self.appman.set_system_mode(True)
+
+        # Run the command and capture the output
+        try:
+            # Capture as bytes first, then decode with error handling
+            result = subprocess.run(command, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, check=False)
+        except Exception as exc:
+            ConsoleWindow.stop_curses()
+            if current_in_user_mode is True:
+                self.appman.set_system_mode(False)
+            print(f'FAILED: {command}: {exc}')
+            sys.exit(1)
+        if current_in_user_mode is True:
+            self.appman.set_system_mode(False)
+
+        if result.returncode != 0:
+            print(f'WARNING: {command}: {result.returncode=}')
+
+        # Decode with multiple fallback strategies
+        try:
+            output = result.stdout.decode('utf-8', errors='replace')
+        except Exception:
+            try:
+                output = result.stdout.decode('latin-1', errors='replace')
+            except Exception:
+                output = str(result.stdout, errors='replace')
+
+        lines = output.splitlines()
+        # ansi_escape_pattern = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+        rv = parse_app_list(lines)
+        return rv
 
     def get_installed(self):
         """ Get the list of lines of installed apps """
         rv = self.cmd_dict('files --byname')
         return rv
-
-    @staticmethod
-    def get_appman_dir():
-        """ Try to figure out where the apps are stored. """
-
-        appman_dir = None
-        try:
-            config_dir = os.getenv('XDG_CONFIG_HOME')
-            if not config_dir:
-                config_dir = os.path.join(os.getenv('HOME'), '.config')
-            config_file = os.path.join(config_dir, 'appman', 'appman-config')
-            with open(config_file, 'r', encoding='utf-8', errors='replace') as fh:
-                appman_dir = fh.read().strip()
-            # appman-config may contain either an absolute path or a home-relative path;
-            # use as-is if absolute, otherwise join to HOME.
-            if not os.path.isabs(appman_dir):
-                appman_dir = os.path.join(os.getenv('HOME'), appman_dir)
-            os.listdir(appman_dir)
-            return appman_dir
-        except Exception as exc:
-            print(f'NOTE: cannot get appman dir; tried below {appman_dir!r}; {exc}')
-            print('    Check if contents of ~/.config/appman/appman-config'
-                  + ' is the subdir of $HOME w your appman apps')
-            return None
-
-    @staticmethod
-    def get_dot_desktop_dir():
-        """ Try to figure out where the .desktop files are stored. """
-
-        try:
-            data_dir = os.getenv('XDG_DATA_HOME')
-            if not data_dir:
-                data_dir = os.path.join(os.getenv('HOME'), '.local', 'share')
-            dot_dir = os.path.join(data_dir, 'applications')
-            os.listdir(dot_dir)
-            return dot_dir
-        except Exception as exc:
-            print(f'NOTE: cannot get .desktop dir; tried below {data_dir!r}; {exc}')
-            print('    Check if contents of ~/.local/share/applications for .desktop files')
-            return None
 
     def navigate_to(self, screen_num):
         """Navigate to a screen with validation hooks."""
@@ -888,8 +530,6 @@ class Vappman(Prerequisites):
             cmd = ['appman']
         else:
             cmd = ['am']
-            if not self.opts.in_system_mode and subcommand == 'install':
-                subcommand = '--user'
         cmd.append(subcommand)
         if app:
             cmd.append(app)
@@ -924,100 +564,6 @@ class Vappman(Prerequisites):
         # 6. Update installs and restart curses environment
         self.installs = self.get_installed()
         ConsoleWindow._start_curses()
-
-    @staticmethod
-    def launch_desktop_file(desktop_file_path):
-        """ Launch the .desktop file using xdg-open in a detached process """
-        try:
-            trial = ['xdg-open', desktop_file_path]
-            subprocess.Popen(trial,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
-            return None
-        except Exception:
-            return trial
-
-    def launch_in_terminal(self, executable):
-        """ Find a terminal emulator"""
-        if not self.terminal_emulator:
-            maybes = [
-                [ 'konsole', '--noclose', '-e', '"{command}"'],
-                [ 'gnome-terminal', '--', 'bash', '-c', '"{command}"; exec bash' ],
-                [ 'xfce4-terminal', '--hold', '--command="{command}"' ],
-                [ 'lxterminal', '-e', """bash -c '"{command}"; echo; read -p "Press Enter to close..."'"""],
-                [ 'alacritty', '--hold', '-e', 'sh', '-c', '"{command}"' ],
-                [ 'guake', '--new-tab', '--execute-command="sh -c \'{command} ; exec $SHELL\'"' ],
-                [ 'tilix', '-e', 'sh -c "{command} ; exec $SHELL"' ],
-                [ 'sakura', '-x', 'sh -c "{command} ; bash"' ],
-                [ 'terminator', '-e', 'bash -c " {command} ; bash "' ],
-                [ 'kitty', '--hold', '/bin/sh', '-c', '"{command}"' ],
-                # [ hyper', ], # cannot be supported
-                # [ yakuake', ], # cannot be supported
-            ]
-            for maybe in maybes:
-                if shutil.which(maybe[0]):
-                    self.terminal_emulator = maybe
-                    break
-        # On success return None; on failure return the attempted argument list
-        if not self.terminal_emulator:
-            return None
-        trial = []
-        if self.terminal_emulator:
-            try:
-                for wd in self.terminal_emulator:
-                    trial.append(wd.replace('{command}', executable))
-                subprocess.Popen(trial)
-                return None
-            except Exception:
-                return trial
-        return None
-
-    def launch_app(self, app):
-        """ Try to run an app."""
-        # First dig out where it might be installed as a .desktop file
-        # by searching the 'remove' script
-        def get_unique_words_from_file(file_path):
-            seen_words = set()
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as file:
-                for line in file:
-                    line_words = line.split()
-                    for word in line_words:
-                        if word not in seen_words:
-                            seen_words.add(word)
-            return seen_words
-
-        failures = []
-        executables = []
-        try:
-            for globname in get_unique_words_from_file(
-                    os.path.join(self.appman_dir, app, 'remove')):
-                results = glob.glob(globname)
-                if '/share/applications/AM-ZZZ' in globname:
-                    for result in results:
-                        if result.endswith('.desktop'):
-                            failure = self.launch_desktop_file(result)
-                            if failure:
-                                failures.append(' '.join(failure))
-                            return
-                elif '/.local/bin/' in globname:
-                    for result in results:
-                        if os.access(result, os.X_OK):
-                            executables.append(result)
-            for executable in executables:
-                failure = self.launch_in_terminal(executable)
-                if failure:
-                    failures.append(' '.join(failure))
-                return
-        except Exception as exc:
-            failures += f'cannot find .desktop/executable to run [{exc}]'
-        if failures:
-            message = ' '.join([f'Cannot launch {app}'] + failures)
-            self.win.alert(message=message)
-
-    def do_key(self, key):
-        """ TBD """
-
-        return None
-
 
 def main():
     """ The program """
