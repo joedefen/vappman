@@ -792,7 +792,7 @@ class Vappman(Prerequisites):
             return appman_dir
         except Exception as exc:
             print(f'NOTE: cannot get appman dir; tried below {appman_dir!r}; {exc}')
-            print('    Check if contents of ~/config/appman/appman-config'
+            print('    Check if contents of ~/.config/appman/appman-config'
                   + ' is the subdir of $HOME w your appman apps')
             return None
 
@@ -889,7 +889,7 @@ class Vappman(Prerequisites):
         else:
             cmd = ['am']
             if not self.opts.in_system_mode and subcommand == 'install':
-                cmd.append('--user')
+                subcommand = '--user'
         cmd.append(subcommand)
         if app:
             cmd.append(app)
