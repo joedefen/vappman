@@ -165,7 +165,7 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'installed':
-            self.app.launch_app(context.app)
+            self.app.launcher.launch_in_terminal(context.app)
     
     def default_ACTION(self):
         """ TBD """
@@ -272,7 +272,7 @@ class Vappman(Prerequisites):
         print(f'{self.has_appman=}')
         self.disk_state = PersistentState('vappman', max_backups=1)
         self.appman = AppmanVars()
-        self.launcher = AppmanLauncher()
+        self.launcher = AppmanLauncher(self.appman)
 
         self.actions = {} # currently available actions
         self.prev_filter = '' # string
@@ -292,6 +292,7 @@ class Vappman(Prerequisites):
         win_opts.pick_attr = cs.A_BOLD|cs.A_UNDERLINE
         win_opts.dialog_abort = True
         win_opts.ctrl_c_terminates = False
+        win_opts.min_cols_rows = (60, 10)
         self.win = ConsoleWindow(win_opts)
 
         # Initialize screens and screen stack
