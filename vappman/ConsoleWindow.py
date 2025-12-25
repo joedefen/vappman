@@ -74,6 +74,18 @@ dump_str = None
 
 ctrl_c_flag = False
 
+# Navigation keys to exclude from demo mode highlighting
+NAVIGATION_KEYS = {
+    curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT,
+    curses.KEY_HOME, curses.KEY_END, curses.KEY_PPAGE, curses.KEY_NPAGE,
+    ord('j'), ord('k'), ord('h'), ord('l'),
+    ord('0'), ord('$'), ord('H'), ord('M'), ord('L'),
+    ord('\x15'),  # Ctrl-U (half page up)
+    ord('\x04'),  # Ctrl-D (half page down)
+    ord('\x02'),  # Ctrl-B (page up)
+    ord('\x06'),  # Ctrl-F (page down)
+}
+
 
 class Context:
     """
@@ -135,7 +147,8 @@ class ConsoleWindowOpts:
     __slots__ = ['head_line', 'head_rows', 'body_rows', 'body_cols', 'keys',
                  'pick_mode', 'pick_size', 'mod_pick', 'pick_attr', 'ctrl_c_terminates',
                  'return_if_pos_change', 'min_cols_rows', 'dialog_abort', 'dialog_return',
-                 'single_cell_scroll_indicator', 'answer_show_redraws', 'strip_attrs_in_pick_mode']
+                 'single_cell_scroll_indicator', 'answer_show_redraws', 'strip_attrs_in_pick_mode',
+                 'demo_mode']
 
     def __init__(self, **kwargs):
         """
@@ -175,6 +188,7 @@ class ConsoleWindowOpts:
         self.single_cell_scroll_indicator = kwargs.get('single_cell_scroll_indicator', False)
         self.answer_show_redraws = kwargs.get('answer_show_redraws', False)
         self.strip_attrs_in_pick_mode = kwargs.get('strip_attrs_in_pick_mode', False)
+        self.demo_mode = kwargs.get('demo_mode', False)
 
         # Validate dialog_abort
         if self.dialog_abort not in [None, 'ESC', 'ESC-ESC']:
@@ -683,6 +697,8 @@ class ConsoleWindow:
         self.scroll_view_size = 0  # no. viewable lines of the body
         self.handled_keys = set(self.opts.keys) if isinstance(self.opts.keys, (set, list)) else set()
         self.pending_keys = set()
+        self.last_demo_key = ''  # Last key pressed in demo mode
+        self.max_header_len = 0  # Max visible header length from previous render
         self._set_screen_dims()
         self.calc()
 
@@ -702,6 +718,49 @@ class ConsoleWindow:
             self.handled_keys = set(keys)
         else:
             self.handled_keys = set()
+
+    def set_demo_mode(self, enabled):
+        """
+        Enable or disable demo mode.
+
+        When demo mode is enabled, the last non-navigation key pressed is shown
+        in reverse video at the end of the first header line.
+
+        :param enabled: True to enable demo mode, False to disable
+        :type enabled: bool
+        """
+        self.opts.demo_mode = enabled
+        if not enabled:
+            self.last_demo_key = ''
+
+    def _format_key_for_demo(self, key):
+        """
+        Format a key code as a 3-character string for demo mode display.
+
+        :param key: The key code to format
+        :type key: int
+        :returns: 3-character string representation of the key
+        :rtype: str
+        """
+        # Special multi-character keys
+        if key == 27:  # ESC
+            return 'ESC'
+        elif key == ord('\t'):
+            return 'TAB'
+        elif key == ord('\n') or key == curses.KEY_ENTER or key == 10 or key == 13:
+            return 'ENT'
+        elif key == ord(' '):
+            return 'SPC'
+        elif key == curses.KEY_BACKSPACE or key == 127 or key == 8:
+            return 'BSP'
+        elif key == curses.KEY_DC:
+            return 'DEL'
+        # Printable single character keys - center with spaces
+        elif 32 < key < 127:
+            return f' {chr(key)} '
+        # Default for unrecognized keys
+        else:
+            return '???'
 
     def get_pad_width(self):
         """
@@ -1122,10 +1181,29 @@ class ConsoleWindow:
         if current_text:
             result_sections.append((current_text, None))
 
+        # Calculate visible length of this header line
+        visible_length = sum(len(text) for text, attr in result_sections)
+
+        # Check if this is the first header line
+        is_first_header = (self.head.row_cnt == 0)
+
+        # Add demo indicator to first header if demo mode is active
+        if is_first_header and self.opts.demo_mode and self.last_demo_key:
+            # Pad to max_header_len + 2 spaces
+            padding_needed = max(0, self.max_header_len + 2 - visible_length)
+            if padding_needed > 0:
+                result_sections.append((' ' * padding_needed, None))
+            # Add demo key in reverse video
+            result_sections.append((self.last_demo_key, curses.A_REVERSE))
+
         # Now output the sections using add_header with resume
         for idx, (text, attr) in enumerate(result_sections):
             resume = bool(idx > 0)  # Resume for all but the first section
             self.add_header(text, attr=attr, resume=resume)
+
+        # Track max header length for next render (excluding demo indicator)
+        if visible_length > self.max_header_len:
+            self.max_header_len = visible_length
 
     def draw(self, y, x, text, text_attr=None, width=None, leftpad=False, header=False):
         """
@@ -1991,9 +2069,16 @@ class ConsoleWindow:
 
             # App keys...
             if key in self.handled_keys:
+                # Update demo mode tracking for non-navigation keys
+                if self.opts.demo_mode and key not in NAVIGATION_KEYS:
+                    self.last_demo_key = self._format_key_for_demo(key)
                 return key # return for handling
 
             # Navigation Keys...
+            # Clear demo mode indicator when any navigation key is pressed
+            if self.opts.demo_mode and key in NAVIGATION_KEYS:
+                self.last_demo_key = ''
+
             pos = self.pick_pos if self.pick_mode else self.scroll_pos
             delta = self.pick_size if self.pick_mode else 1
             was_pos = pos

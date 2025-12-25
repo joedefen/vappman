@@ -178,11 +178,13 @@ import shutil
 import shlex
 import subprocess
 import traceback
+from types import SimpleNamespace
 import curses as cs
 from .ConsoleWindow import (
     ConsoleWindow, OptionSpinner, ConsoleWindowOpts,
     Screen, ScreenStack, BasicHelpScreen, Context
 )
+from .PersistentState import PersistentState
 
 # Screen constants
 HOME_ST, HELP_ST = 0, 1
@@ -192,6 +194,7 @@ class Prerequisites:
     """ Detect / install prereqs """
     def __init__(self):
         self.has_am = False
+        self.has_appman = False
 
     def detect_package_manager(self):
         """
@@ -330,8 +333,8 @@ class Prerequisites:
         print('Checking prerequisites...')
 
         missing = set()
-        self.has_am = bool(shutil.which('am') is not None
-                          or shutil.which('appman') is not None)
+        self.has_am = bool(shutil.which('am') is not None)
+        self.has_appman = bool(shutil.which('appman') is not None)
 
         for prog in 'curl grep jq sed wget'.split():
             if shutil.which(prog) is None:
@@ -354,7 +357,7 @@ class Prerequisites:
                 sys.exit(1)
 
         # Handle missing AM/appman
-        if not self.has_am:
+        if not self.has_am and not self.has_appman:
             if not self.install_am_appman():
                 print('\n❌ Cannot proceed without AM/appman.')
                 print('\nManual installation instructions:')
@@ -375,8 +378,72 @@ class Prerequisites:
         """ Get lines with the given start put into a dict keyed by the
             1st word.
         """
+        def parse_app_list(lines):
+            def shorten(raw_type):
+                TYPE_MAP = {
+                    "appimage": "AppI",
+                    "dynamic-binary": "DyBi",
+                    "static-binary": "StBi",
+                    "bash-script": "Bash",
+                    "python-script": "Pyth",
+                }
+
+                # Strip the libfuse2 '*' if present
+                clean_type = raw_type.lower().rstrip('*')
+                # Return mapped value or first 4 chars if unknown
+                return TYPE_MAP.get(clean_type, clean_type[:4].capitalize())
+
+            apps = {}
+            current_global = False
+            
+            # Process line by line
+            # lines = input_text.strip().split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                
+                # Determine context (Global vs Local)
+                if 'BY "AM"' in line:
+                    current_global = True
+                    continue
+                elif 'AS "APPMAN"' in line:
+                    current_global = False
+                    continue
+                    
+                # Identify data lines (they start with the diamond symbol ◆)
+                if line.startswith('◆'):
+                    # Remove the symbol and split by pipe '|'
+                    # We strip whitespace and also remove the '*' indicator for libfuse2
+                    parts = [p.strip().rstrip('*') for p in line[1:].split('|')]
+                    
+                    if len(parts) >= 3:
+                        name = parts[0]
+                        version = parts[1]
+                        app_type = parts[2]
+                        
+                        # Store as a SimpleNamespace for dot-notation access
+                        apps[name] = SimpleNamespace(
+                                        version=version,
+                                        app_type=shorten(app_type),
+                                        global_status=current_global,
+                                        synopsis=None,
+                                        raw=line
+                                    )
+                    else:
+                        mat = re.match(r'\s*([^\s]+)\s+:\s+([^\s].*)', line[1:])
+                        if mat:
+                            apps[mat.group(1)] = SimpleNamespace(
+                                                    version=None,
+                                                    app_type=None,
+                                                    global_status=None,
+                                                    synopsis=mat.group(2),
+                                                    raw=line
+                                                )
+                        
+            return apps
         # Define the command to run
-        command = cmd.split()
+        command = ['appman' if self.has_appman else 'am']
+        command += cmd.split()
         # Run the command and capture the output
         try:
             # Capture as bytes first, then decode with error handling
@@ -400,26 +467,8 @@ class Prerequisites:
                 output = str(result.stdout, errors='replace')
 
         lines = output.splitlines()
-        ansi_escape_pattern = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
-        rv = {}
-        prev_wd1 = None
-        for line in lines:
-            line = ansi_escape_pattern.sub('', line) # get clean text
-            if re.match(start, line):
-                line = line.strip()
-                wd1 = self.get_word1(line)
-                if wd1:
-                    rv[wd1] = line
-                    prev_wd1 = wd1
-            elif prev_wd1 and line.startswith(' '):
-                line = line.strip()
-                if line:
-                    rv[prev_wd1] += ' ' + line
-                else:
-                    prev_wd1 = None
-            else:
-                prev_wd1 = None
-
+        # ansi_escape_pattern = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+        rv = parse_app_list(lines)
         return rv
 
 class VappmanScreen(Screen):
@@ -455,22 +504,46 @@ class HomeScreen(VappmanScreen):
             return '?version?'
 
         win.set_pick_mode(True)
+        win.set_demo_mode(app.opts.demo_mode)
+
+        title = "APPMAN"
+        if not app.has_appman:
+            title = "AM-SYSTEM" if app.opts.in_system_mode else 'AM-USER'
+            if app.disk_state.in_system_mode != app.opts.in_system_mode:
+                app.disk_state.in_system_mode = app.opts.in_system_mode
+                app.disk_state.save()
+        if app.disk_state.max_backups != app.opts.max_backups:
+            app.disk_state.max_backups = app.opts.max_backups
+            app.disk_state.save()
+
 
         # Show installed apps first
-        for appname, line in app.installs.items():
-            if appname in app.apps:
-                line = app.apps[appname]
-            if wanted(line[2:]):
-                line = f'✔✔✔ {appname} [{version_of(appname)}] :{line.split(":", maxsplit=1)[1]}'
-                win.add_body(line, context=Context("installed", app=appname))
+        idx = 0
+        for appname, ns in app.installs.items():
+            ns2 = app.apps[appname] if appname in app.apps else None
+            if ns2 and wanted(ns.raw[2:]):
+                where = "S" if ns.global_status else "u"
+                checks = f'✔⋅{where}'
+                app_ver = f'{appname} [{ns.version}]  '
+                fill = '⋅' if idx % 3 == 1 else ''
+                idx += 1
+                line = f'{checks} {ns.app_type:<4} ⋅ {app_ver:{fill}<30} : {ns2.synopsis}'
+                win.add_body(line, context=Context("installed", app=appname, ver=ns.version))
 
         # Then show available (not installed) apps
-        for appname, line in app.apps.items():
-            if appname not in app.installs and wanted(line[2:]):
-                win.add_body(line, context=Context("uninstalled", app=appname))
+        for appname, ns in app.apps.items():
+            if appname not in app.installs and wanted(ns.raw[2:]):
+                fill = '⋅' if idx % 3 == 1 else ''
+                idx += 1
+                win.add_body(f'{ns.raw[:1]:<3} {appname:{fill}<20}  {ns.synopsis}',
+                             context=Context("uninstalled", app=appname, ver=ns.version))
+                
+
+        header1 = f'{title}  {app.get_keys_line()}'
+
 
         # Use fancy header formatting to highlight keys automatically
-        win.add_fancy_header(app.get_keys_line())
+        win.add_fancy_header(header1, app.opts.fancy_header)
 
         # Build dynamic action keys (e.g., " [r]mv [u]pd [b]kup")
         # Get base header line and combine with dynamic actions
@@ -480,8 +553,9 @@ class HomeScreen(VappmanScreen):
                 header2 = ' [r]mv [u]pd [b]kup [o]verwr [t]est'
             elif context.genre == 'uninstalled':
                 header2 = ' [i]nstall'
-            header2 += ' [a]bout'
-        win.add_fancy_header(header2)
+            header2 += f' [a]bout #:maxBkUp={app.opts.max_backups}'
+        
+        win.add_fancy_header(header2, app.opts.fancy_header)
                 
     def appman_on_installed(self, verb):
         """ TBD """
@@ -507,8 +581,9 @@ class HomeScreen(VappmanScreen):
 
     def about_ACTION(self):
         """ TBD """
-        app = self.app
-        return app.run_appman('about', app.pick_app)
+        context = self.win.get_picked_context()
+        if context:
+            self.app.run_appman('about', context.app)
 
     def test_ACTION(self):
         """ TBD """
@@ -568,7 +643,7 @@ class HomeScreen(VappmanScreen):
         prefix = ''
         while True:
             pattern = app.win.answer(f'{prefix}Enter filter regex:',
-                                     seed=app.prev_filter)
+                                     seed=app.prev_filter, height=1)
             if pattern is None:
                 app.prev_filter = start_filter
                 return None # they gave up
@@ -615,11 +690,16 @@ class Vappman(Prerequisites):
         super().__init__()
         assert not Vappman.singleton
         Vappman.singleton = self
+        
+        self.check_preqreqs()
+        print(f'{self.has_am=}')
+        print(f'{self.has_appman=}')
+        self.disk_state = PersistentState('vappman', in_system_mode=False, max_backups=1)
 
         self.actions = {} # currently available actions
         self.prev_filter = '' # string
         self.filter = None # compiled pattern
-        self.apps = self.cmd_dict('appman list')
+        self.apps = self.cmd_dict('list')
         self.installs = self.get_installed() # dict keyed by app
         self.appman_dir = self.get_appman_dir()
         self.dot_desktop_dir = self.get_dot_desktop_dir()
@@ -646,9 +726,18 @@ class Vappman(Prerequisites):
         self.ss = ScreenStack(self.win, None, SCREENS, self.screens)
 
         spin = self.spin = OptionSpinner(stack=self.ss)
+        self.opts = spin.default_obj
         spin.add_key('quit', 'q,x - quit program (CTL-C disabled)',
                      genre='action', keys='qx')
         spin.add_key('help', '? - enter help screen', genre='action')
+        spin.add_key('fancy_header', '_ - fancy header mode', vals=['Underline', 'Reverse', 'Off'])
+        spin.add_key('demo_mode', '* - demo_mode', vals=[False, True])
+        if not self.has_appman:
+            spin.add_key('in_system_mode', 'S - AM system mode', vals=[False, True])
+            self.opts.in_system_mode = self.disk_state.in_system_mode
+        spin.add_key('max_backups', '# - max backups per app', vals=[1, 2, -1])
+        self.opts.max_backups = self.disk_state.max_backups
+
 
         spin.add_key('sync', 's - sync (update appman itself)', genre='action')
         spin.add_key('clean', 'c - clean (remove unneeded files/folders)', genre='action')
@@ -669,7 +758,6 @@ class Vappman(Prerequisites):
         spin.add_key('test', 't - test (open a terminal and run app', genre='action')
         spin.add_key('escape_help', 'ESC - leave help (return to prior screen)',
                       genre='action', keys=27, scope=HELP_ST)
-        self.opts = spin.default_obj
         self.win.set_handled_keys(self.spin)
 
 
@@ -681,7 +769,7 @@ class Vappman(Prerequisites):
 
     def get_installed(self):
         """ Get the list of lines of installed apps """
-        rv = self.cmd_dict('appman files --byname')
+        rv = self.cmd_dict('files --byname')
         return rv
 
     @staticmethod
@@ -776,10 +864,6 @@ class Vappman(Prerequisites):
                     self.opts.quit = False
                     break
 
-                if key in self.spin.keys:
-                    _ = self.spin.do_key(key, self.win)
-                    # return value
-
                 # Actions delegated to screen classes - automatically handled
                 self.ss.perform_actions(self.spin)
 
@@ -800,7 +884,13 @@ class Vappman(Prerequisites):
         """ Run an 'appman' command using subprocess. """
 
         # 1. Build the command list
-        cmd = ['appman', subcommand]
+        if self.has_appman:
+            cmd = ['appman']
+        else:
+            cmd = ['am']
+            if not self.opts.in_system_mode and subcommand == 'install':
+                cmd.append('--user')
+        cmd.append(subcommand)
         if app:
             cmd.append(app)
 
