@@ -92,30 +92,28 @@ class HomeScreen(VappmanScreen):
         idx = 0
         for appname, ns in app.installs.items():
             ns2 = app.apps.get(appname, None)
-            if ns2 and wanted(ns.raw[2:]):
+            if ns2 and wanted(ns2.raw[2:]):
                 where = "S" if 'S' in ns.where else "⋅"
                 where += "U" if 'U' in ns.where else "⋅"
                 checks = f'✔{where}'
-                pad = 30 - len(f'{appname} {ns.version}')
-                fill = '⋅' if idx % 3 == 1 else ''
-                app_ver = f'{appname}   {"":{fill}>{pad}} {ns.version}'
-                idx += 1
-                line = f'{checks} {ns.app_type:<4} ⋅ {app_ver}  {ns2.synopsis}'
+                line = f'{checks} {appname:<10} {ns2.synopsis}'
+
                 status = "installed" if app.opts.in_system_mode or 'U' in where else "uninstalled"
-                win.add_body(line, context=Context(status, app=appname, ver=ns.version))
+                win.add_body(line, context=Context(status, abut=1, app=appname, ver=ns.version))
+
+                if (idx == win.pick_pos):
+                    line = f'{"":<13}  ╰── {ns.version} {ns.app_type}'
+                    win.add_body(line, context=Context(None, pickable=True))
+                idx += 1
 
         # Then show available (not installed) apps
         for appname, ns in app.apps.items():
             if appname not in app.installs and wanted(ns.raw[2:]):
-                fill = '⋅' if idx % 3 == 1 else ''
-                idx += 1
-                win.add_body(f'{ns.raw[:1]:<3} {appname:{fill}<20}  {ns.synopsis}',
+                fill = '⋅' if idx % 3 == 100 else ''
+                win.add_body(f'{ns.raw[:1]:>3} {appname:{fill}<10}  {ns.synopsis}',
                              context=Context("uninstalled", app=appname, ver=ns.version))
-                
 
         header1 = f'{title}  {app.get_keys_line()}'
-
-
         # Use fancy header formatting to highlight keys automatically
         win.add_fancy_header(header1, app.opts.fancy_header)
 
@@ -123,13 +121,17 @@ class HomeScreen(VappmanScreen):
         # Get base header line and combine with dynamic actions
         header2, context = '', self.win.get_picked_context()
         if context:
-            mode = 'Sys' if app.opts.in_system_mode else 'Usr'
+            # mode = 'Sys' if app.opts.in_system_mode else 'Usr'
             header2 = f' #:maxBkUp={app.opts.max_backups}   '
             if context.genre == 'installed':
-                header2 += ' [r]mv [u]pd [b]kup [o]verwr [t]est'
+                header2 += ' [r]mv [u]pd [b]kup'
+                cnt = len(app.appman.get_snapshots(
+                            context.app, app.opts.max_backups))
+                if cnt:
+                    header2 += f' [o]verwr/{cnt}'
+                header2 += ' [t]est'
             elif context.genre == 'uninstalled':
                 header2 += ' [i]nstall'
-            header2 += f' [a]bout'
         
         win.add_fancy_header(header2, app.opts.fancy_header)
                 
@@ -312,7 +314,7 @@ class Vappman(Prerequisites):
         if not self.has_appman:
             spin.add_key('in_system_mode', 'S - AM system mode', vals=[False, True])
             self.opts.in_system_mode = self.appman.is_system_mode()
-        spin.add_key('max_backups', '# - max backups per app', vals=[1, 2, -1])
+        spin.add_key('max_backups', '# - max backups per app', vals=[-1, 2, 1])
         self.opts.max_backups = self.disk_state.max_backups
 
 
@@ -392,7 +394,7 @@ class Vappman(Prerequisites):
                         else:
                             apps[name] = SimpleNamespace(
                                             version=version,
-                                            app_type=shorten(app_type),
+                                            app_type=app_type, # shorten(app_type),
                                             where=where,
                                             synopsis=None,
                                             raw=line

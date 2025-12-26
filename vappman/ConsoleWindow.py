@@ -1479,14 +1479,38 @@ class ConsoleWindow:
                     range_size = max_line - min_line + 1
 
                     if range_size <= self.scroll_view_size:
-                        # Entire range fits: show it all, starting from min_line
-                        self.scroll_pos = min_line
+                        # Entire range fits: minimal scrolling to keep it visible
+                        # Only scroll if the range would go off-screen
+                        viewport_bottom = self.scroll_pos + self.scroll_view_size - 1
+
+                        # Check if the range would go below viewport (prioritize "after" lines)
+                        if max_line > viewport_bottom:
+                            # Scroll down just enough to show max_line at the bottom
+                            self.scroll_pos = max_line - self.scroll_view_size + 1
+                        # Check if the range would go above viewport
+                        elif min_line < self.scroll_pos:
+                            # Scroll up to show min_line at the top
+                            self.scroll_pos = min_line
+                        # else: range is already fully visible, don't scroll
                     else:
-                        # Range doesn't fit: prioritize "after" by putting picked line at top
-                        self.scroll_pos = self.pick_pos
-                        # But ensure we don't show lines above min_line
+                        # Range doesn't fit: minimal scrolling to keep picked line + abut lines visible
+                        # Priority: keep "after" lines visible (they take precedence over "before" lines)
+
+                        # Calculate the bottom of the current viewport
+                        viewport_bottom = self.scroll_pos + self.scroll_view_size - 1
+
+                        # Check if picked line + after lines would go below viewport
+                        if max_line > viewport_bottom:
+                            # Need to scroll down: position so max_line is at bottom of viewport
+                            self.scroll_pos = max_line - self.scroll_view_size + 1
+                        # Check if picked line + before lines would go above viewport
+                        elif min_line < self.scroll_pos:
+                            # Need to scroll up: position so min_line is at top of viewport
+                            self.scroll_pos = min_line
+                        # else: picked line + abut range is already fully visible, don't scroll
+
+                        # Ensure we don't show lines above min_line or beyond max_line
                         self.scroll_pos = max(self.scroll_pos, min_line)
-                        # And ensure we don't show lines beyond max_line
                         max_scroll = max_line - self.scroll_view_size + 1
                         self.scroll_pos = min(self.scroll_pos, max_scroll)
                 elif self.scroll_pos > self.pick_pos:

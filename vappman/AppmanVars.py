@@ -17,7 +17,7 @@ class AppmanVars:
         xdg_config = os.getenv('XDG_CONFIG_HOME')
         self._config_base = Path(xdg_config) if xdg_config else Path.home() / ".config"
         self._mode_file = self._config_base / "appman" / "appman-mode"
-        self.snapshot_base = Path.home() / ".am.snapshots"
+        self.snapshot_base = Path.home() / ".am-snapshots"
         self.user_app_dir = self._find_user_app_dir()
 
     def is_user_mode(self) -> bool:
