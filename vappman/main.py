@@ -101,8 +101,8 @@ class HomeScreen(VappmanScreen):
         for appname, ns in app.installs.items():
             # ns2 = app.basics.get(appname, None)
             if ns and wanted(ns.raw[2:]):
-                where = "S" if 'S' in ns.where else "⋅"
-                where += "U" if 'U' in ns.where else "⋅"
+                where = "S" if 'S' in ns.where else '─' # "⋅"
+                where += "U" if 'U' in ns.where else '─' # "⋅"
                 check = '🔒' if self.is_sandboxed(ns) else ' ✔'
                 checks = f'{check}{where}'
                 line = f'{checks} {appname:<10} {ns.synopsis}'
