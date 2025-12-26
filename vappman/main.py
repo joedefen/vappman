@@ -92,6 +92,9 @@ class HomeScreen(VappmanScreen):
         if app.disk_state.max_backups != app.opts.max_backups:
             app.disk_state.max_backups = app.opts.max_backups
             app.disk_state.save()
+        if app.disk_state.install_opts != app.opts.install_opts:
+            app.disk_state.install_opts = app.opts.install_opts
+            app.disk_state.save()
 
 
         #############################################
@@ -138,7 +141,7 @@ class HomeScreen(VappmanScreen):
             # mode = 'Sys' if app.opts.in_system_mode else 'Usr'
             header2 = f' #:maxBkUp={app.opts.max_backups}   '
             if context.genre == 'installed':
-                header2 += ' [r]mv [u]pd [b]kup'
+                header2 += ' [r]mv [u]pd C:icons [b]kup'
                 cnt = len(app.appman.get_snapshots(
                             context.info.name, app.opts.max_backups))
                 if cnt:
@@ -148,7 +151,7 @@ class HomeScreen(VappmanScreen):
                 header2 += ' S:' + ('unbox' if sandboxed else 'box')
                 header2 += ' [t]est'
             elif context.genre == 'uninstalled':
-                header2 += ' [i]nstall'
+                header2 += f' [i]nstall O:opts={app.opts.install_opts}'
         
         win.add_fancy_header(header2, app.opts.fancy_header)
                 
@@ -184,6 +187,10 @@ class HomeScreen(VappmanScreen):
             else:
                 verb = '--sandbox'
             self.appman_on_installed(verb)
+
+    def icons_ACTION(self):
+        """ TBD """
+        self.appman_on_installed('--icons')
 
     def about_ACTION(self):
         """ TBD """
@@ -300,7 +307,8 @@ class Vappman(Prerequisites):
         self.check_preqreqs()
         print(f'{self.has_am=}')
         print(f'{self.has_appman=}')
-        self.disk_state = PersistentState('vappman', max_backups=1)
+        self.disk_state = PersistentState(
+                    'vappman', max_backups=1, install_opts='')
         self.appman = AppmanVars()
         self.launcher = AppmanLauncher(self.appman)
 
@@ -344,6 +352,7 @@ class Vappman(Prerequisites):
             self.opts.in_system_mode = self.appman.is_system_mode()
         spin.add_key('max_backups', '# - max backups per app', vals=[-1, 2, 1])
         self.opts.max_backups = self.disk_state.max_backups
+        self.opts.install_opts = self.disk_state.install_opts
 
 
         spin.add_key('sync', 's - sync (update appman itself)', genre='action')
@@ -354,10 +363,15 @@ class Vappman(Prerequisites):
         spin.add_key('escape_filter', 'ESC - clear filter and jump to top', genre='action', keys=27)
 
         spin.add_key('install', 'i - install uninstalled app', genre='action')
+        spin.add_key('install_opts', 'O - install options', vals=[
+                                '', 'icons', 'sandbox', 'icons,sandbox'])
         spin.add_key('default', 'ENTER - install/uninstall app',
                      genre='action', keys=[cs.KEY_ENTER, 10])
         spin.add_key('remove', 'r - remove installed app', genre='action')
+
         spin.add_key('sandbox', 'S - Sandbox/Unsandbox app', genre='action')
+        spin.add_key('icons', 'C - appimage given local icon themes', genre='action')
+
         spin.add_key('about', 'a - about (more info about app)', genre='action')
 
         spin.add_key('backup', 'b - backup installed app', genre='action')
@@ -561,6 +575,9 @@ class Vappman(Prerequisites):
         else:
             cmd = ['am']
         cmd.append(subcommand)
+        if subcommand == 'install':
+            for opt in self.opts.install_opts.split(','):
+                cmd.append(f'--{opt}')
         if app:
             cmd.append(app)
 
