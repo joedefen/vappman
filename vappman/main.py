@@ -66,6 +66,12 @@ class VappmanScreen(Screen):
 class HomeScreen(VappmanScreen):
     """Main home screen showing installed and available apps"""
 
+    @staticmethod
+    def is_sandboxed(info):
+        """ Given the 'info' namespace for an installed app,
+        return whether sandboxed """
+        return bool(info and info.app_type and '🔒' in info.app_type)
+
     def draw_screen(self):
         """Draw the home screen with app list"""
         app = self.app
@@ -79,7 +85,7 @@ class HomeScreen(VappmanScreen):
 
         title = "APPMAN"
         if not app.has_appman:
-            title = "S:AM-SYSTEM" if app.opts.in_system_mode else 'S:AM-USER'
+            title = 'm:AM-SYSTEM' if app.opts.in_system_mode else 'm:AM-USER'
             if app.appman.is_system_mode() != app.opts.in_system_mode:
                 app.appman.set_system_mode(app.opts.in_system_mode)
                 app.installs = app.get_installed()
@@ -88,31 +94,39 @@ class HomeScreen(VappmanScreen):
             app.disk_state.save()
 
 
-        # Show installed apps first
+        #############################################
+        # Show INSTALLED apps first
+        #############################################
         idx = 0
         for appname, ns in app.installs.items():
-            ns2 = app.apps.get(appname, None)
-            if ns2 and wanted(ns2.raw[2:]):
+            # ns2 = app.basics.get(appname, None)
+            if ns and wanted(ns.raw[2:]):
                 where = "S" if 'S' in ns.where else "⋅"
                 where += "U" if 'U' in ns.where else "⋅"
-                checks = f'✔{where}'
-                line = f'{checks} {appname:<10} {ns2.synopsis}'
+                check = '🔒' if self.is_sandboxed(ns) else ' ✔'
+                checks = f'{check}{where}'
+                line = f'{checks} {appname:<10} {ns.synopsis}'
 
                 status = "installed" if app.opts.in_system_mode or 'U' in where else "uninstalled"
-                win.add_body(line, context=Context(status, abut=1, app=appname, ver=ns.version))
+                win.add_body(line, context=Context(status, info=ns))
 
                 if (idx == win.pick_pos):
                     line = f'{"":<13}  ╰── {ns.version} {ns.app_type}'
-                    win.add_body(line, context=Context(None, pickable=True))
+                    win.add_body(line, context=Context("TRANSIENT"))
                 idx += 1
 
-        # Then show available (not installed) apps
-        for appname, ns in app.apps.items():
+        #############################################
+        # Show UNINSTALLED apps afterwards
+        #############################################
+        for appname, ns in app.basics.items():
             if appname not in app.installs and wanted(ns.raw[2:]):
                 fill = '⋅' if idx % 3 == 100 else ''
-                win.add_body(f'{ns.raw[:1]:>3} {appname:{fill}<10}  {ns.synopsis}',
-                             context=Context("uninstalled", app=appname, ver=ns.version))
+                win.add_body(f'{ns.raw[:1]:>4} {appname:{fill}<10}  {ns.synopsis}',
+                             context=Context("uninstalled", info=ns))
 
+        #############################################
+        # Create HEADER LINES
+        #############################################
         header1 = f'{title}  {app.get_keys_line()}'
         # Use fancy header formatting to highlight keys automatically
         win.add_fancy_header(header1, app.opts.fancy_header)
@@ -126,9 +140,12 @@ class HomeScreen(VappmanScreen):
             if context.genre == 'installed':
                 header2 += ' [r]mv [u]pd [b]kup'
                 cnt = len(app.appman.get_snapshots(
-                            context.app, app.opts.max_backups))
+                            context.info.name, app.opts.max_backups))
                 if cnt:
                     header2 += f' [o]verwr/{cnt}'
+                sandboxed = self.is_sandboxed(context.info)
+                # header2 += ' S:' + ('-🔒' if sandboxed else '+🔒')
+                header2 += ' S:' + ('unbox' if sandboxed else 'box')
                 header2 += ' [t]est'
             elif context.genre == 'uninstalled':
                 header2 += ' [i]nstall'
@@ -139,7 +156,7 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'installed':
-            self.app.run_appman(verb, context.app)
+            self.app.run_appman(verb, context.info.name)
 
     def remove_ACTION(self):
         """ TBD """
@@ -157,17 +174,28 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         self.appman_on_installed('overwrite')
 
+    def sandbox_ACTION(self):
+        """ TBD """
+        context = self.win.get_picked_context()
+        
+        if context.genre == "installed":
+            if self.is_sandboxed(context.info):
+                verb = '--disable-sandbox'
+            else:
+                verb = '--sandbox'
+            self.appman_on_installed(verb)
+
     def about_ACTION(self):
         """ TBD """
         context = self.win.get_picked_context()
         if context:
-            self.app.run_appman('about', context.app)
+            self.app.run_appman('about', context.info.name)
 
     def test_ACTION(self):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'installed':
-            self.app.launcher.launch_in_terminal(context.app)
+            self.app.launcher.launch_in_terminal(context.info.name)
     
     def default_ACTION(self):
         """ TBD """
@@ -182,7 +210,7 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'uninstalled':
-            self.app.run_appman('install', context.app)
+            self.app.run_appman('install', context.info.name)
 
     #################################
     def reinstall_ACTION(self):
@@ -279,7 +307,7 @@ class Vappman(Prerequisites):
         self.actions = {} # currently available actions
         self.prev_filter = '' # string
         self.filter = None # compiled pattern
-        self.apps = self.cmd_dict('list')
+        self.basics, _ = self.cmd_dict('list')
         self.installs = self.get_installed() # dict keyed by app
         self.terminal_emulator = None
         self.has_am = None
@@ -289,9 +317,9 @@ class Vappman(Prerequisites):
 
         win_opts = ConsoleWindowOpts()
         win_opts.head_line=True
-        win_opts.body_rows=len(self.apps)+20
+        win_opts.body_rows=len(self.basics)+20
         win_opts.head_rows = 10
-        win_opts.pick_attr = cs.A_BOLD|cs.A_UNDERLINE
+        # win_opts.pick_attr = cs.A_BOLD|cs.A_UNDERLINE
         win_opts.dialog_abort = True
         win_opts.ctrl_c_terminates = False
         win_opts.min_cols_rows = (60, 10)
@@ -312,7 +340,7 @@ class Vappman(Prerequisites):
         spin.add_key('fancy_header', '_ - fancy header mode', vals=['Underline', 'Reverse', 'Off'])
         spin.add_key('demo_mode', '* - demo_mode', vals=[False, True])
         if not self.has_appman:
-            spin.add_key('in_system_mode', 'S - AM system mode', vals=[False, True])
+            spin.add_key('in_system_mode', 'm - AM system mode', vals=[False, True])
             self.opts.in_system_mode = self.appman.is_system_mode()
         spin.add_key('max_backups', '# - max backups per app', vals=[-1, 2, 1])
         self.opts.max_backups = self.disk_state.max_backups
@@ -329,6 +357,7 @@ class Vappman(Prerequisites):
         spin.add_key('default', 'ENTER - install/uninstall app',
                      genre='action', keys=[cs.KEY_ENTER, 10])
         spin.add_key('remove', 'r - remove installed app', genre='action')
+        spin.add_key('sandbox', 'S - Sandbox/Unsandbox app', genre='action')
         spin.add_key('about', 'a - about (more info about app)', genre='action')
 
         spin.add_key('backup', 'b - backup installed app', genre='action')
@@ -346,21 +375,20 @@ class Vappman(Prerequisites):
         """
         def parse_app_list(lines):
             nonlocal current_in_user_mode
-            def shorten(raw_type):
-                TYPE_MAP = {
-                    "appimage": "AppI",
-                    "dynamic-binary": "DyBi",
-                    "static-binary": "StBi",
-                    "bash-script": "Bash",
-                    "python-script": "Pyth",
-                }
+#           def shorten(raw_type):
+#               TYPE_MAP = {
+#                   "appimage": "AppI",
+#                   "dynamic-binary": "DyBi",
+#                   "static-binary": "StBi",
+#                   "bash-script": "Bash",
+#                   "python-script": "Pyth",
+#               }
+#               # Strip the libfuse2 '*' if present
+#               clean_type = raw_type.lower().rstrip('*')
+#               # Return mapped value or first 4 chars if unknown
+#               return TYPE_MAP.get(clean_type, clean_type[:4].capitalize())
 
-                # Strip the libfuse2 '*' if present
-                clean_type = raw_type.lower().rstrip('*')
-                # Return mapped value or first 4 chars if unknown
-                return TYPE_MAP.get(clean_type, clean_type[:4].capitalize())
-
-            apps = {}
+            installs, basics = {}, {}
             where = None
             
             # Process line by line
@@ -380,6 +408,8 @@ class Vappman(Prerequisites):
                     
                     if len(parts) >= 3:
                         name = parts[0]
+                        if name in ('am', 'appman', ):
+                            continue
                         version = parts[1]
                         app_type = parts[2]
                         location = self.appman.where_is(name)
@@ -387,30 +417,22 @@ class Vappman(Prerequisites):
                         where += 'U' if location.usr_path else ''
                         
                         # Store as a SimpleNamespace for dot-notation access
-                        ns = apps.get(name, None)
+                        ns = installs.get(name, None)
                         if ns:  # we have both user and system apps
                             if current_in_user_mode:
                                 ns.version=version
                         else:
-                            apps[name] = SimpleNamespace(
-                                            version=version,
-                                            app_type=app_type, # shorten(app_type),
-                                            where=where,
-                                            synopsis=None,
-                                            raw=line
-                                        )
+                            installs[name] = SimpleNamespace(name=name,
+                                        version=version, app_type=app_type,
+                                        where=where, synopsis=None, raw=line)
                     else:
                         mat = re.match(r'\s*([^\s]+)\s+:\s+([^\s].*)', line[1:])
                         if mat:
-                            apps[mat.group(1)] = SimpleNamespace(
-                                                    version=None,
-                                                    app_type=None,
-                                                    where='',
-                                                    synopsis=mat.group(2),
-                                                    raw=line
-                                                )
+                            name = mat.group(1)
+                            basics[name] = SimpleNamespace(name=name,
+                                    synopsis=mat.group(2), raw=line)
                         
-            return apps
+            return basics, installs
         # Define the command to run
         command = ['appman' if self.has_appman else 'am']
         command += cmd.split()
@@ -454,7 +476,12 @@ class Vappman(Prerequisites):
 
     def get_installed(self):
         """ Get the list of lines of installed apps """
-        rv = self.cmd_dict('files --byname')
+        _, rv = self.cmd_dict('files --byname')
+        for appname, info in rv.items():
+            basic = self.basics.get(appname, None)
+            if basic:
+                info.synopsis = basic.synopsis
+                info.raw = basic.raw
         return rv
 
     def navigate_to(self, screen_num):

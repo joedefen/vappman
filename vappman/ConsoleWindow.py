@@ -95,7 +95,12 @@ class Context:
     Apps can add custom attributes via **kwargs.
 
     :param genre: Category/type of the line (e.g., 'header', 'app', 'separator')
+                  Special genres with uppercase names:
+                  - 'DECOR': Visual decorations (separators, headers) - automatically non-pickable
+                  - 'TRANSIENT': Conditional/dropdown content shown below parent row
+                    Automatically gets abut to keep TRANSIENT rows visible when parent is picked
     :param pickable: Whether this line can be selected in pick mode (default: True)
+                     Automatically set to False for uppercase genres
     :param kwargs: Custom attributes to attach to this context
     :type genre: str
     :type pickable: bool
@@ -131,7 +136,12 @@ class Context:
     """
     def __init__(self, genre='', pickable=True, **kwargs):
         self.genre = genre
-        self.pickable = pickable
+        # Auto-set pickable=False only for DECOR genre
+        # TRANSIENT is navigable but ephemeral (handled by app logic)
+        if genre == 'DECOR':
+            self.pickable = False
+        else:
+            self.pickable = pickable
         # Allow apps to add custom attributes
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -787,6 +797,32 @@ class ConsoleWindow:
             return True  # Default to pickable if no context
         return ctx.pickable
 
+    def _count_pickable_rows(self, start_pos, count, direction=1):
+        """
+        Move through count pickable rows from start_pos in the given direction.
+
+        This skips non-pickable rows (DECOR, TRANSIENT) so that page-up/down
+        moves through a consistent number of actual content rows.
+
+        :param start_pos: Starting row position
+        :param count: Number of pickable rows to count
+        :param direction: 1 for forward, -1 for backward
+        :type start_pos: int
+        :type count: int
+        :type direction: int
+        :returns: The row position after counting pickable rows
+        :rtype: int
+        """
+        pos = start_pos
+        pickable_count = 0
+
+        while 0 <= pos < self.body.row_cnt and pickable_count < count:
+            pos += direction
+            if 0 <= pos < self.body.row_cnt and self._is_pickable(pos):
+                pickable_count += 1
+
+        return pos
+
     def get_picked_context(self):
         """
         Get the Context object for the currently picked line.
@@ -826,6 +862,43 @@ class ConsoleWindow:
                 return (0, abut_value)
         else:
             return None
+
+    def _get_effective_abut(self, row):
+        """
+        Get the effective abut value for a row, either explicit or auto-calculated.
+
+        For rows with TRANSIENT children, automatically calculates abut to show
+        all consecutive TRANSIENT rows below.
+
+        :param row: The row index to get abut for
+        :type row: int
+        :returns: Abut value (can be int, list, or None) suitable for _cook_abut()
+        :rtype: int or list or None
+        """
+        if row < 0 or row >= len(self.body.contexts):
+            return None
+
+        ctx = self.body.contexts[row]
+        if ctx is None:
+            return None
+
+        # Explicit abut takes precedence
+        if hasattr(ctx, 'abut') and ctx.abut is not None:
+            return ctx.abut
+
+        # Auto-abut for TRANSIENT: count consecutive TRANSIENT rows below
+        transient_count = 0
+        for i in range(row + 1, self.body.row_cnt):
+            next_ctx = self.body.contexts[i] if i < len(self.body.contexts) else None
+            if next_ctx and next_ctx.genre == 'TRANSIENT':
+                transient_count += 1
+            else:
+                break
+
+        if transient_count > 0:
+            return [0, transient_count]  # Show 0 before, N after
+
+        return None
 
     @staticmethod
     def get_nav_keys_blurb():
@@ -1436,9 +1509,9 @@ class ConsoleWindow:
                 # First, get abut range from the PREVIOUS pick position (before delta was applied)
                 abut_range = None
                 if 0 <= old_pick_pos < len(self.body.contexts):
-                    old_ctx = self.body.contexts[old_pick_pos]
-                    if old_ctx and hasattr(old_ctx, 'abut'):
-                        cooked = self._cook_abut(old_ctx.abut)
+                    effective_abut = self._get_effective_abut(old_pick_pos)
+                    if effective_abut is not None:
+                        cooked = self._cook_abut(effective_abut)
                         if cooked:
                             before, after = cooked
                             # Calculate the valid line range based on old position
@@ -1460,10 +1533,10 @@ class ConsoleWindow:
                     self.pick_pos -= (self.pick_pos % self.pick_size)
 
                 # Re-check for abut in the CURRENT pick position for scroll adjustment
-                ctx = self.get_picked_context()
                 abut_range = None
-                if ctx and hasattr(ctx, 'abut'):
-                    cooked = self._cook_abut(ctx.abut)
+                effective_abut = self._get_effective_abut(self.pick_pos)
+                if effective_abut is not None:
+                    cooked = self._cook_abut(effective_abut)
                     if cooked:
                         before, after = cooked
                         # Calculate the valid line range: [min_line, max_line]
