@@ -44,6 +44,7 @@ from .PersistentState import PersistentState
 from .AppmanVars import AppmanVars, AppLocation
 from .AppmanLauncher import AppmanLauncher
 from .Prerequisites import Prerequisites
+from .VappmanListCache import AppCacheManager
 
 # Screen constants
 HOME_ST, HELP_ST = 0, 1
@@ -51,6 +52,8 @@ SCREENS = ['HOME', 'HELP']
 
 class VappmanScreen(Screen):
     """ Base class for all VappmanScreens"""
+    app: 'Vappman'  # Type hint for IDE support
+
     def quit_ACTION(self):
         """ TBD """
         self.win.stop_curses()
@@ -73,12 +76,19 @@ class HomeScreen(VappmanScreen):
         return bool(info and info.app_type and '🔒' in info.app_type)
 
     def draw_screen(self):
-        """Draw the home screen with app list"""
+        """Draw the home screen with app list  ⮜–⮞
+        """
         app = self.app
         win = self.win
 
-        def wanted(line):
-            return not app.filter or app.filter.search(line)
+        def wanted(ns):
+            if ns.db not in ('am', ):
+                return False
+            if not app.filter:
+                return True
+            if not ns:
+                return False
+            return app.filter.search(ns.appname + ' ' + ns.db + ' ' + ns.synopsis)
 
         win.set_pick_mode(True)
         win.set_demo_mode(app.opts.demo_mode)
@@ -101,9 +111,9 @@ class HomeScreen(VappmanScreen):
         # Show INSTALLED apps first
         #############################################
         idx = 0
-        for appname, ns in app.installs.items():
+        for (appname, db), ns in app.installs.items():
             # ns2 = app.basics.get(appname, None)
-            if ns and wanted(ns.raw[2:]):
+            if ns and wanted(ns):
                 where = "S" if 'S' in ns.where else '─' # "⋅"
                 where += "U" if 'U' in ns.where else '─' # "⋅"
                 check = '🔒' if self.is_sandboxed(ns) else ' ✔'
@@ -121,10 +131,10 @@ class HomeScreen(VappmanScreen):
         #############################################
         # Show UNINSTALLED apps afterwards
         #############################################
-        for appname, ns in app.basics.items():
-            if appname not in app.installs and wanted(ns.raw[2:]):
+        for (appname, db), ns in app.apps_by_name_db.items():
+            if (appname, db) not in app.installs and wanted(ns):
                 fill = '⋅' if idx % 3 == 100 else ''
-                win.add_body(f'{ns.raw[:1]:>4} {appname:{fill}<10}  {ns.synopsis}',
+                win.add_body(f'{"◆":>4} {appname:{fill}<10}  {ns.synopsis}',
                              context=Context("uninstalled", info=ns))
 
         #############################################
@@ -143,7 +153,7 @@ class HomeScreen(VappmanScreen):
             if context.genre == 'installed':
                 header2 += ' [r]mv [u]pd C:icons [b]kup'
                 cnt = len(app.appman.get_snapshots(
-                            context.info.name, app.opts.max_backups))
+                            context.info.appname, app.opts.max_backups))
                 if cnt:
                     header2 += f' [o]verwr/{cnt}'
                 sandboxed = self.is_sandboxed(context.info)
@@ -159,7 +169,7 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'installed':
-            self.app.run_appman(verb, context.info.name)
+            self.app.run_appman(verb, context.info.appname)
 
     def remove_ACTION(self):
         """ TBD """
@@ -196,13 +206,13 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         context = self.win.get_picked_context()
         if context:
-            self.app.run_appman('about', context.info.name)
+            self.app.run_appman('about', context.info.appname)
 
     def test_ACTION(self):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'installed':
-            self.app.launcher.launch_in_terminal(context.info.name)
+            self.app.launcher.launch_in_terminal(context.info.appname)
     
     def default_ACTION(self):
         """ TBD """
@@ -217,7 +227,7 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'uninstalled':
-            self.app.run_appman('install', context.info.name)
+            self.app.run_appman('install', context.info.appname)
 
     #################################
     def reinstall_ACTION(self):
@@ -315,22 +325,26 @@ class Vappman(Prerequisites):
         self.actions = {} # currently available actions
         self.prev_filter = '' # string
         self.filter = None # compiled pattern
-        self.basics, _ = self.cmd_dict('list')
-        self.installs = self.get_installed() # dict keyed by app
+        # self.basics, _ = self.cmd_dict('list')
         self.terminal_emulator = None
         self.has_am = None
 
         self.prev_pos = 0
         self.next_prompt_seconds = [0.1, 0.1]  # Initial fast renders, then slow down
+        self.cache_mgr = AppCacheManager()
+        self.apps_to_list = self.cache_mgr.get_apps()
+        self.apps_by_name_db = self.cache_mgr.apps_by_key
+        self.installs = self.get_installed() # dict keyed by app
 
         win_opts = ConsoleWindowOpts()
         win_opts.head_line=True
-        win_opts.body_rows=len(self.basics)+20
+        win_opts.body_rows=len(self.apps_by_name_db)+1000
         win_opts.head_rows = 10
         # win_opts.pick_attr = cs.A_BOLD|cs.A_UNDERLINE
         win_opts.dialog_abort = True
         win_opts.ctrl_c_terminates = False
         win_opts.min_cols_rows = (60, 10)
+
         self.win = ConsoleWindow(win_opts)
 
         # Initialize screens and screen stack
@@ -389,19 +403,6 @@ class Vappman(Prerequisites):
         """
         def parse_app_list(lines):
             nonlocal current_in_user_mode
-#           def shorten(raw_type):
-#               TYPE_MAP = {
-#                   "appimage": "AppI",
-#                   "dynamic-binary": "DyBi",
-#                   "static-binary": "StBi",
-#                   "bash-script": "Bash",
-#                   "python-script": "Pyth",
-#               }
-#               # Strip the libfuse2 '*' if present
-#               clean_type = raw_type.lower().rstrip('*')
-#               # Return mapped value or first 4 chars if unknown
-#               return TYPE_MAP.get(clean_type, clean_type[:4].capitalize())
-
             installs, basics = {}, {}
             where = None
             
@@ -420,33 +421,37 @@ class Vappman(Prerequisites):
                     # We strip whitespace and also remove the '*' indicator for libfuse2
                     parts = [p.strip().rstrip('*') for p in line[1:].split('|')]
                     
-                    if len(parts) >= 3:
+                    if len(parts) in (4, 5):
                         name = parts[0]
+                        db_adj = 1 if len(parts) == 5 else 0
                         if name in ('am', 'appman', ):
                             continue
-                        version = parts[1]
-                        app_type = parts[2]
+                        db = parts[1] if db_adj else 'am'
+                        version = parts[1+db_adj]
+                        app_type = parts[2+db_adj]
+                        # size = parts[3+db_adj]
+
                         location = self.appman.where_is(name)
                         where = 'S' if location.sys_path else ''
                         where += 'U' if location.usr_path else ''
                         
                         # Store as a SimpleNamespace for dot-notation access
-                        ns = installs.get(name, None)
+                        ns = installs.get((name, db), None)
                         if ns:  # we have both user and system apps
                             if current_in_user_mode:
                                 ns.version=version
                         else:
-                            installs[name] = SimpleNamespace(name=name,
+                            installs[(name,db)] = SimpleNamespace(appname=name, db=db,
                                         version=version, app_type=app_type,
                                         where=where, synopsis=None, raw=line)
-                    else:
-                        mat = re.match(r'\s*([^\s]+)\s+:\s+([^\s].*)', line[1:])
-                        if mat:
-                            name = mat.group(1)
-                            basics[name] = SimpleNamespace(name=name,
-                                    synopsis=mat.group(2), raw=line)
+#                   else:
+#                       mat = re.match(r'\s*([^\s]+)\s+:\s+([^\s].*)', line[1:])
+#                       if mat:
+#                           name = mat.group(1)
+#                           basics[name] = SimpleNamespace(name=name,
+#                                   synopsis=mat.group(2), raw=line)
                         
-            return basics, installs
+            return installs
         # Define the command to run
         command = ['appman' if self.has_appman else 'am']
         command += cmd.split()
@@ -490,12 +495,11 @@ class Vappman(Prerequisites):
 
     def get_installed(self):
         """ Get the list of lines of installed apps """
-        _, rv = self.cmd_dict('files --byname')
-        for appname, info in rv.items():
-            basic = self.basics.get(appname, None)
+        rv = self.cmd_dict('files --byname')
+        for app_db_key, info in rv.items():
+            basic = self.apps_by_name_db.get(app_db_key, None)
             if basic:
                 info.synopsis = basic.synopsis
-                info.raw = basic.raw
         return rv
 
     def navigate_to(self, screen_num):
@@ -535,6 +539,9 @@ class Vappman(Prerequisites):
 
             win.render()
             key = win.prompt(seconds=self.next_prompt_seconds[0])
+            if self.cache_mgr.check_for_updates(): # this happens once at most
+                self.apps_by_name_db = self.cache_mgr.apps_by_key
+                self.installs = self.get_installed()
 
             # Adjust prompt timing (fast initially, then slower)
             self.next_prompt_seconds.pop(0)
