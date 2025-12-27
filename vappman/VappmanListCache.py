@@ -53,8 +53,9 @@ class VAppConfigParser:
     def parse(self):
         apps = {}  # key: appname, value: list of namespaces
         apps_by_key = {}  # key: (appname, db), value: one namespace
+        databases = set(['am'])
         if not os.path.exists(self.filepath):
-            return apps, apps_by_key
+            return apps, apps_by_key, databases
 
         # Read file with multiple fallback strategies for encoding
         lines = []
@@ -74,7 +75,7 @@ class VAppConfigParser:
             lines = content.splitlines()
         except Exception as e:
             print(f"[VappmanListCache] Error reading file {self.filepath}: {e}")
-            return apps, apps_by_key
+            return apps, apps_by_key, databases
 
         current_appname = None
         current_text = []
@@ -101,6 +102,7 @@ class VAppConfigParser:
                     db_match = re.search(r'--(\w+)\s+flag', raw_text)
                     if db_match:
                         db = db_match.group(1)
+                        databases.add(db)
 
                 entry = SimpleNamespace(appname=current_appname, synopsis=synopsis, db=db)
 
@@ -159,7 +161,7 @@ class VAppConfigParser:
         except Exception as e:
             print(f"[VappmanListCache] Error during parsing: {e}")
 
-        return apps, apps_by_key
+        return apps, apps_by_key, databases
 
 
 # --- 3. The Manager ---
@@ -170,6 +172,7 @@ class AppCacheManager:
         self.list_file = os.path.join(self.config_dir, "list-all.txt")
         self.cache_duration = cache_duration
         self.binary = self._find_binary()
+        self.dbs = set(['am'])
         self.apps = {}  # key: appname, value: list of namespaces
         self.apps_by_key = {}  # key: (appname, db), value: one namespace
         self.runner = None
@@ -181,7 +184,9 @@ class AppCacheManager:
 
     def _parse_now(self):
         parser = VAppConfigParser(self.list_file)
-        self.apps, self.apps_by_key = parser.parse()
+        apps, apps_by_key, databases = parser.parse()
+        if len(apps_by_key) > 1000: # actually expecting over 5000
+            self.apps, self.apps_by_key, self.dbs = apps, apps_by_key, databases
 
     def refresh_background(self):
         if self.runner and self.runner.is_running(): return

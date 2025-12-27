@@ -80,9 +80,11 @@ class HomeScreen(VappmanScreen):
         """
         app = self.app
         win = self.win
+        all_dbs = bool(app.opts.database == 'ALL')
 
         def wanted(ns):
-            if ns.db not in ('am', ):
+            nonlocal app, all_dbs
+            if not all_dbs and app.opts.database != ns.db:
                 return False
             if not app.filter:
                 return True
@@ -118,7 +120,10 @@ class HomeScreen(VappmanScreen):
                 where += "U" if 'U' in ns.where else '─' # "⋅"
                 check = '🔒' if self.is_sandboxed(ns) else ' ✔'
                 checks = f'{check}{where}'
-                line = f'{checks} {appname:<10} {ns.synopsis}'
+                # name = f'{appname}⮜{ns.db}⮞' if all_dbs else appname 
+                name = f'{appname} @{ns.db}' if all_dbs else appname 
+                wid = 18 if all_dbs else 10
+                line = f'{checks} {name:<{wid}} {ns.synopsis}'
 
                 status = "installed" if app.opts.in_system_mode or 'U' in where else "uninstalled"
                 win.add_body(line, context=Context(status, info=ns))
@@ -134,7 +139,10 @@ class HomeScreen(VappmanScreen):
         for (appname, db), ns in app.apps_by_name_db.items():
             if (appname, db) not in app.installs and wanted(ns):
                 fill = '⋅' if idx % 3 == 100 else ''
-                win.add_body(f'{"◆":>4} {appname:{fill}<10}  {ns.synopsis}',
+                # name = f'{appname}⮜{ns.db}⮞' if all_dbs else appname 
+                name = f'{appname} @{ns.db}' if all_dbs else appname 
+                wid = 18 if all_dbs else 10
+                win.add_body(f'{"◆":>4} {name:{fill}<{wid}}  {ns.synopsis}',
                              context=Context("uninstalled", info=ns))
 
         #############################################
@@ -259,34 +267,13 @@ class HomeScreen(VappmanScreen):
         app.win.pick_pos = 0
 
     def slash_ACTION(self):
-        """ TBD """
+        """ Enter search-as-you-type mode """
         app = self.app
-        # pylint: disable=protected-access
-        start_filter = app.prev_filter
-        prefix = ''
-        while True:
-            pattern = app.win.answer(f'{prefix}Enter filter regex:',
-                                     seed=app.prev_filter, height=1)
-            if pattern is None:
-                app.prev_filter = start_filter
-                return None # they gave up
-            app.prev_filter = pattern
-            pattern.strip()
-            if not pattern:
-                app.filter = None
-                break
-            try:
-                if re.match(r'^[\-\w\s]*$', pattern):
-                    words = pattern.split()
-                    app.filter = re.compile(r'\b' + r'(|.*\b)'.join(words), re.IGNORECASE)
-                    break
-                app.filter = re.compile(pattern, re.IGNORECASE)
-                break
-            except Exception:
-                prefix = 'Bad regex: '
-        if start_filter != app.prev_filter: # when filter changes, move to top
-            app.win.pick_pos = 0
-
+        app.start_filter = app.prev_filter
+        app.search_mode = True
+        app.search_cursor_pos = len(app.prev_filter)
+        # Enable pass-through mode so all printable keys are returned
+        app.win.passthrough_mode = True
         return None
 
 
@@ -325,6 +312,9 @@ class Vappman(Prerequisites):
         self.actions = {} # currently available actions
         self.prev_filter = '' # string
         self.filter = None # compiled pattern
+        self.search_mode = False # True when in search-as-you-type mode
+        self.search_cursor_pos = 0 # cursor position within search string
+        self.start_filter = '' # filter value when entering search mode
         # self.basics, _ = self.cmd_dict('list')
         self.terminal_emulator = None
         self.has_am = None
@@ -359,6 +349,9 @@ class Vappman(Prerequisites):
         spin.add_key('quit', 'q,x - quit program (CTL-C disabled)',
                      genre='action', keys='qx')
         spin.add_key('help', '? - enter help screen', genre='action')
+        dbs = sorted(list(self.cache_mgr.dbs))
+        spin.add_key('database', 'd - select app database', vals=['ALL'] + dbs)
+
         spin.add_key('fancy_header', '_ - fancy header mode', vals=['Underline', 'Reverse', 'Off'])
         spin.add_key('demo_mode', '* - demo_mode', vals=[False, True])
         if not self.has_appman:
@@ -367,6 +360,7 @@ class Vappman(Prerequisites):
         spin.add_key('max_backups', '# - max backups per app', vals=[-1, 2, 1])
         self.opts.max_backups = self.disk_state.max_backups
         self.opts.install_opts = self.disk_state.install_opts
+        self.opts.database = 'am'
 
 
         spin.add_key('sync', 's - sync (update appman itself)', genre='action')
@@ -549,25 +543,84 @@ class Vappman(Prerequisites):
                 self.next_prompt_seconds = [3.0]
 
             if key is not None:
-                # Let OptionSpinner process the key
-                self.spin.do_key(key, win)
+                # Handle search mode keys first (MUST be before spin.do_key)
+                if self.search_mode:
+                    if key in [10, 13]:  # ENTER - accept search
+                        self.search_mode = False
+                        win.passthrough_mode = False  # Disable pass-through
+                        self.compile_filter(self.prev_filter)
+                        if self.start_filter != self.prev_filter:
+                            win.pick_pos = 0  # Move to top when filter changes
+                    elif key == 27:  # ESC - cancel search, restore old pattern
+                        self.prev_filter = self.start_filter
+                        self.search_mode = False
+                        win.passthrough_mode = False  # Disable pass-through
+                        self.compile_filter(self.prev_filter)
+                    elif key in [cs.KEY_BACKSPACE, 127, 8, 263]:  # Backspace (multiple codes)
+                        if self.search_cursor_pos > 0:
+                            chars = list(self.prev_filter)
+                            chars.pop(self.search_cursor_pos - 1)
+                            self.prev_filter = ''.join(chars)
+                            self.search_cursor_pos -= 1
+                            self.compile_filter(self.prev_filter)
+                    elif key == cs.KEY_LEFT:  # Left arrow
+                        if self.search_cursor_pos > 0:
+                            self.search_cursor_pos -= 1
+                    elif key == cs.KEY_RIGHT:  # Right arrow
+                        if self.search_cursor_pos < len(self.prev_filter):
+                            self.search_cursor_pos += 1
+                    elif key == cs.KEY_HOME or key == 1:  # Home or Ctrl-A
+                        self.search_cursor_pos = 0
+                    elif key == cs.KEY_END or key == 5:  # End or Ctrl-E
+                        self.search_cursor_pos = len(self.prev_filter)
+                    elif 32 <= key <= 126:  # Printable characters
+                        chars = list(self.prev_filter)
+                        chars.insert(self.search_cursor_pos, chr(key))
+                        self.prev_filter = ''.join(chars)
+                        self.search_cursor_pos += 1
+                        self.compile_filter(self.prev_filter)
+                else:
+                    # Normal mode - let OptionSpinner process the key
+                    self.spin.do_key(key, win)
 
-                # Handle quit
-                if self.opts.quit:
-                    self.opts.quit = False
-                    break
+                    # Handle quit
+                    if self.opts.quit:
+                        self.opts.quit = False
+                        break
 
-                # Actions delegated to screen classes - automatically handled
-                self.ss.perform_actions(self.spin)
+                    # Actions delegated to screen classes - automatically handled
+                    self.ss.perform_actions(self.spin)
 
             win.clear()
+
+    def compile_filter(self, pattern):
+        """Compile filter pattern and update display immediately"""
+        pattern = pattern.strip()
+        if not pattern:
+            self.filter = None
+            return
+        try:
+            if re.match(r'^[\-\w\s]*$', pattern):
+                words = pattern.split()
+                self.filter = re.compile(r'\b' + r'(|.*\b)'.join(words), re.IGNORECASE)
+            else:
+                self.filter = re.compile(pattern, re.IGNORECASE)
+        except Exception:
+            self.filter = None  # Invalid regex - show no matches
 
     def get_keys_line(self):
         """ Build header line with fancy formatting markup (static actions only) """
         # Static actions with markup for fancy headers
-        line = '[s]ync [c]lean [U]pd [R]eInst [q]uit ?:help'
+        line = f'[s]ync [c]lean [U]pd [R]eInst [q]uit ?:help  [d]b={self.opts.database}'
         # Only show filter pattern if it's non-empty
-        if self.prev_filter:
+        if self.search_mode:
+            # In search mode, show cursor position with | and add spaces around pattern
+            # to prevent it from being treated as a search pattern by fancy_header
+            before = self.prev_filter[:self.search_cursor_pos]
+            after = self.prev_filter[self.search_cursor_pos:]
+            # Add space after / to break pattern matching in fancy_header
+            line += f' / {before}|{after}'
+        elif self.prev_filter:
             line += f' /{self.prev_filter}'
         line += '  '
         return line

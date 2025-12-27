@@ -709,6 +709,7 @@ class ConsoleWindow:
         self.pending_keys = set()
         self.last_demo_key = ''  # Last key pressed in demo mode
         self.max_header_len = 0  # Max visible header length from previous render
+        self.passthrough_mode = False  # When True, all printable keys pass through
         self._set_screen_dims()
         self.calc()
 
@@ -2165,7 +2166,18 @@ class ConsoleWindow:
                 break
 
             # App keys...
-            if key in self.handled_keys:
+            # In passthrough mode, return all printable keys plus special editing keys
+            # Special editing keys: backspace, arrows, home, end
+            editing_keys = {curses.KEY_BACKSPACE, 127, 8, 263,  # backspace variants
+                          curses.KEY_LEFT, curses.KEY_RIGHT,
+                          curses.KEY_HOME, curses.KEY_END,
+                          1, 5}  # Ctrl-A, Ctrl-E
+            if self.passthrough_mode and (32 <= key <= 126 or key in editing_keys or key in self.handled_keys):
+                # Update demo mode tracking for non-navigation keys
+                if self.opts.demo_mode and key not in NAVIGATION_KEYS:
+                    self.last_demo_key = self._format_key_for_demo(key)
+                return key
+            elif key in self.handled_keys:
                 # Update demo mode tracking for non-navigation keys
                 if self.opts.demo_mode and key not in NAVIGATION_KEYS:
                     self.last_demo_key = self._format_key_for_demo(key)
