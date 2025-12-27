@@ -8,6 +8,7 @@ This module provides several key classes:
 
 * :py:class:`ConsoleWindow` - High-level curses wrapper for terminal UI with header/body
   layout, scrolling, and pick (selection) mode
+* :py:class:`IncrementalSearchBar` - Reusable search-as-you-type component with cursor editing
 * :py:class:`OptionSpinner` - Manages key-driven application settings that can cycle
   through values or prompt for input
 * :py:class:`Screen` - Base class for implementing individual screens in a multi-screen
@@ -229,6 +230,220 @@ def restore_ctrl_c():
     Called upon curses shutdown.
     """
     signal.signal(signal.SIGINT, signal.default_int_handler)
+
+
+class IncrementalSearchBar:
+    """
+    Generic incremental search bar with text editing and cursor support.
+
+    Provides a reusable pattern for implementing search-as-you-type functionality
+    with full cursor editing capabilities (backspace, arrows, home/end, printable chars).
+
+    Features:
+        - Text editing with cursor position tracking
+        - ENTER to accept changes, ESC to cancel (restores original text)
+        - Callbacks for text changes, accept, and cancel events
+        - Formatted display string with cursor indicator
+        - Integrates with ConsoleWindow's passthrough_mode
+
+    Example Usage:
+        # Define callbacks for your application
+        def on_text_change(text):
+            # Update filter/search results incrementally
+            app.compile_filter(text)
+
+        def on_accept(text):
+            # Finalize search, disable passthrough mode
+            app.search_complete = True
+            win.passthrough_mode = False
+
+        def on_cancel(original_text):
+            # Restore original state
+            app.compile_filter(original_text)
+            win.passthrough_mode = False
+
+        # Create search bar instance
+        search_bar = IncrementalSearchBar(
+            on_change=on_text_change,
+            on_accept=on_accept,
+            on_cancel=on_cancel
+        )
+
+        # In your key binding action (e.g., slash key):
+        def slash_ACTION(self):
+            app.search_bar.start(app.current_filter)  # Start with current filter
+            app.win.passthrough_mode = True  # Enable key passthrough
+
+        # In your main event loop:
+        key = win.prompt()
+        if key is not None:
+            if search_bar.is_active:
+                # Let search bar handle the key first
+                if search_bar.handle_key(key):
+                    continue  # Key was handled, skip normal processing
+            # Normal key handling...
+
+        # In your header/display code:
+        if search_bar.is_active:
+            header += search_bar.get_display_string(prefix=' /')
+        elif search_bar.text:
+            header += f' /{search_bar.text}'
+
+    Key Handling:
+        - ENTER (10, 13): Accept current text, exit search mode
+        - ESC (27): Cancel, restore original text, exit search mode
+        - Backspace (8, 127, 263, KEY_BACKSPACE): Delete char before cursor
+        - Left/Right arrows: Move cursor
+        - Home/Ctrl-A: Move cursor to start
+        - End/Ctrl-E: Move cursor to end
+        - Printable chars (32-126): Insert at cursor position
+    """
+
+    def __init__(self, on_change=None, on_accept=None, on_cancel=None):
+        """
+        Initialize the incremental search bar.
+
+        :param on_change: Callback function(text) called when text changes.
+                         Use this to update search results incrementally.
+        :param on_accept: Callback function(text) called when ENTER is pressed.
+                         Use this to finalize the search.
+        :param on_cancel: Callback function(original_text) called when ESC is pressed.
+                         Use this to restore previous state.
+        """
+        self._active = False
+        self._text = ''
+        self._cursor_pos = 0
+        self._start_text = ''  # Text when entering search mode
+
+        # Callbacks
+        self.on_change = on_change
+        self.on_accept = on_accept
+        self.on_cancel = on_cancel
+
+    def start(self, initial_text=''):
+        """
+        Enter search mode with optional initial text.
+
+        :param initial_text: Starting text for the search bar (default: empty string)
+        """
+        self._active = True
+        self._text = initial_text
+        self._start_text = initial_text
+        self._cursor_pos = len(initial_text)
+
+    def handle_key(self, key):
+        """
+        Handle a key press in search mode.
+
+        :param key: Key code from curses
+        :returns: True if the key was handled, False otherwise
+        """
+        if not self._active:
+            return False
+
+        # ENTER - accept search
+        if key in [10, 13]:
+            self._active = False
+            if self.on_accept:
+                self.on_accept(self._text)
+            return True
+
+        # ESC - cancel search, restore original text
+        elif key == 27:
+            self._text = self._start_text
+            self._active = False
+            if self.on_cancel:
+                self.on_cancel(self._start_text)
+            return True
+
+        # Backspace - delete character before cursor
+        elif key in [curses.KEY_BACKSPACE, 127, 8, 263]:
+            if self._cursor_pos > 0:
+                chars = list(self._text)
+                chars.pop(self._cursor_pos - 1)
+                self._text = ''.join(chars)
+                self._cursor_pos -= 1
+                if self.on_change:
+                    self.on_change(self._text)
+            return True
+
+        # Left arrow - move cursor left
+        elif key == curses.KEY_LEFT:
+            if self._cursor_pos > 0:
+                self._cursor_pos -= 1
+            return True
+
+        # Right arrow - move cursor right
+        elif key == curses.KEY_RIGHT:
+            if self._cursor_pos < len(self._text):
+                self._cursor_pos += 1
+            return True
+
+        # Home or Ctrl-A - move to start
+        elif key == curses.KEY_HOME or key == 1:
+            self._cursor_pos = 0
+            return True
+
+        # End or Ctrl-E - move to end
+        elif key == curses.KEY_END or key == 5:
+            self._cursor_pos = len(self._text)
+            return True
+
+        # Printable characters - insert at cursor
+        elif 32 <= key <= 126:
+            chars = list(self._text)
+            chars.insert(self._cursor_pos, chr(key))
+            self._text = ''.join(chars)
+            self._cursor_pos += 1
+            if self.on_change:
+                self.on_change(self._text)
+            return True
+
+        return False
+
+    def get_display_string(self, prefix='/', suffix=''):
+        """
+        Get formatted display string with cursor indicator.
+
+        When active (in search mode), shows cursor position with '|'.
+        When inactive, just shows the text with prefix/suffix if text is non-empty.
+
+        :param prefix: String to show before the search text (default: '/')
+        :param suffix: String to show after the search text (default: '')
+        :returns: Formatted string for display
+
+        Example:
+            Active with cursor: ' /hello| world'
+            Active at end: ' /hello world|'
+            Inactive with text: ' /hello world'
+            Inactive without text: ''
+        """
+        if self._active:
+            # Show cursor position with |
+            before = self._text[:self._cursor_pos]
+            after = self._text[self._cursor_pos:]
+            # Add space after prefix to prevent pattern matching in fancy_header
+            return f'{prefix} {before}|{after}{suffix}'
+        elif self._text:
+            return f'{prefix}{self._text}{suffix}'
+        else:
+            return ''
+
+    @property
+    def is_active(self):
+        """Whether search mode is currently active."""
+        return self._active
+
+    @property
+    def text(self):
+        """Current search text."""
+        return self._text
+
+    @property
+    def cursor_pos(self):
+        """Current cursor position within the text."""
+        return self._cursor_pos
+
 
 class OptionSpinner:
     """

@@ -57,9 +57,37 @@ class PersistentState:
         """Saves current attribute values to the JSON file."""
         # Ensure directory exists
         self._config_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Extract current values of the keys defined in defaults
         current_state = {key: getattr(self, key) for key in self._defaults}
-        
+
         with open(self._config_file, 'w', encoding='utf-8') as f:
             json.dump(current_state, f, indent=4)
+
+    def save_if_changed(self, app_object):
+        """
+        Compare persistent state attributes with matching attributes in app_object.
+        If any differ, update all changed attributes and save once.
+
+        :param app_object: Object to compare attributes with (e.g., app.opts)
+        :returns: True if changes were detected and saved, False otherwise
+        """
+        changed = False
+
+        # Check all persistent state attributes
+        for key in self._defaults:
+            # Only compare if app_object has this attribute
+            if hasattr(app_object, key):
+                app_value = getattr(app_object, key)
+                state_value = getattr(self, key)
+
+                # If values differ, mark as changed and update
+                if app_value != state_value:
+                    setattr(self, key, app_value)
+                    changed = True
+
+        # Save only if something changed
+        if changed:
+            self.save()
+
+        return changed

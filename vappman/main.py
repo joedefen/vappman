@@ -34,11 +34,13 @@ import shutil
 import shlex
 import subprocess
 import traceback
+import textwrap
 from types import SimpleNamespace
 import curses as cs
 from .ConsoleWindow import (
     ConsoleWindow, OptionSpinner, ConsoleWindowOpts,
-    Screen, ScreenStack, BasicHelpScreen, Context
+    Screen, ScreenStack, BasicHelpScreen, Context,
+    IncrementalSearchBar
 )
 from .PersistentState import PersistentState
 from .AppmanVars import AppmanVars, AppLocation
@@ -75,6 +77,63 @@ class HomeScreen(VappmanScreen):
         return whether sandboxed """
         return bool(info and info.app_type and '🔒' in info.app_type)
 
+    def add_folded_synopsis_lines(self, fold_offset, wrapped_lines, max=1, corner=True):
+        """
+        Add wrapped synopsis continuation lines as TRANSIENT context lines.
+
+        Used to display long synopsis text across multiple indented lines
+        when an app is selected (at pick position). Lines are marked as
+        TRANSIENT so they appear/disappear with selection.
+
+        Note: Expects pre-wrapped lines from textwrap.wrap() with initial_indent
+        and subsequent_indent parameters. Skips the first line (already on main line)
+        and shows continuation lines which should already be sized for fold_offset width.
+
+        :param fold_offset: Horizontal position where continuation text should start
+        :param wrapped_lines: Pre-wrapped lines from textwrap.wrap() with indent params
+        :param max: Maximum number of continuation lines to display (default: 1)
+        """
+        def make_indent(amount, corner):
+            rv = ''
+            if amount > 19:
+                rv = ' ' * 15
+                rv += '╰──' if corner else '│'
+                amount -= 18 if corner else 16
+            rv += ' '*amount
+            return rv
+
+        win = self.win
+
+        # Skip first line (already shown on main line), add up to 'max' continuation lines
+        # Continuation lines are already sized correctly from textwrap's subsequent_indent
+        indent = make_indent(2+fold_offset, False)
+        lines = wrapped_lines[1:1+max]
+        for line in lines[:-1]:
+            # Indent to fold_offset position
+            win.add_body(indent + line, context=Context("TRANSIENT"))
+        indent = make_indent(2+fold_offset, corner)
+        if len(lines) > 0:
+            win.add_body(indent + wrapped_lines[-1], context=Context("TRANSIENT"))
+            
+
+    def get_folded_synopsis(self, offset1, offset2, text):
+        """ TBD """
+        width = self.win.cols - 2 - offset2
+        initial_indent = offset1 - offset2
+        # Use textwrap with initial_indent for first line, subsequent_indent for continuations
+        if width > offset1:
+            wraps = textwrap.wrap(
+                text,
+                width=width,
+                initial_indent=' '*initial_indent
+            ) 
+            if wraps:
+                wraps[0] = wraps[0][initial_indent:]
+            return wraps
+        else:
+            return [text]
+
+
     def draw_screen(self):
         """Draw the home screen with app list  ⮜–⮞
         """
@@ -90,7 +149,7 @@ class HomeScreen(VappmanScreen):
                 return True
             if not ns:
                 return False
-            return app.filter.search(ns.appname + ' ' + ns.db + ' ' + ns.synopsis)
+            return app.filter.search(ns.appname + ' @' + ns.db + ' ' + ns.synopsis)
 
         win.set_pick_mode(True)
         win.set_demo_mode(app.opts.demo_mode)
@@ -101,12 +160,8 @@ class HomeScreen(VappmanScreen):
             if app.appman.is_system_mode() != app.opts.in_system_mode:
                 app.appman.set_system_mode(app.opts.in_system_mode)
                 app.installs = app.get_installed()
-        if app.disk_state.max_backups != app.opts.max_backups:
-            app.disk_state.max_backups = app.opts.max_backups
-            app.disk_state.save()
-        if app.disk_state.install_opts != app.opts.install_opts:
-            app.disk_state.install_opts = app.opts.install_opts
-            app.disk_state.save()
+        # Save persistent state if any options changed
+        app.disk_state.save_if_changed(app.opts)
 
 
         #############################################
@@ -120,15 +175,25 @@ class HomeScreen(VappmanScreen):
                 where += "U" if 'U' in ns.where else '─' # "⋅"
                 check = '🔒' if self.is_sandboxed(ns) else ' ✔'
                 checks = f'{check}{where}'
-                # name = f'{appname}⮜{ns.db}⮞' if all_dbs else appname 
-                name = f'{appname} @{ns.db}' if all_dbs else appname 
+                # name = f'{appname}⮜{ns.db}⮞' if all_dbs else appname
+                name = f'{appname} ﹫{ns.db}' if all_dbs else appname
                 wid = 18 if all_dbs else 10
-                line = f'{checks} {name:<{wid}} {ns.synopsis}'
+                line = f'{checks} '
+                fold_offset = len(line) + wid
+                line += f'{name:<{wid}} '
+                first_synopsis_offset = len(line)
+
+                if idx == win.pick_pos:
+                    wraps = self.get_folded_synopsis(first_synopsis_offset, fold_offset, ns.synopsis)
+                    line += wraps[0]
+                else:
+                    line += ns.synopsis 
 
                 status = "installed" if app.opts.in_system_mode or 'U' in where else "uninstalled"
                 win.add_body(line, context=Context(status, info=ns))
 
                 if (idx == win.pick_pos):
+                    self.add_folded_synopsis_lines(fold_offset, wraps, corner=False)
                     line = f'{"":<13}  ╰── {ns.version} {ns.app_type}'
                     win.add_body(line, context=Context("TRANSIENT"))
                 idx += 1
@@ -139,11 +204,27 @@ class HomeScreen(VappmanScreen):
         for (appname, db), ns in app.apps_by_name_db.items():
             if (appname, db) not in app.installs and wanted(ns):
                 fill = '⋅' if idx % 3 == 100 else ''
-                # name = f'{appname}⮜{ns.db}⮞' if all_dbs else appname 
-                name = f'{appname} @{ns.db}' if all_dbs else appname 
+                # name = f'{appname}⮜{ns.db}⮞' if all_dbs else appname
+                name = f'{appname} @{ns.db}' if all_dbs else appname
                 wid = 18 if all_dbs else 10
-                win.add_body(f'{"◆":>4} {name:{fill}<{wid}}  {ns.synopsis}',
-                             context=Context("uninstalled", info=ns))
+                line = f'{"◆":>4} '
+                fold_offset = len(line) + wid
+                line += f'{name:{fill}<{wid}}  '
+                first_synopsis_offset = len(line)
+
+                # Calculate offsets for uninstalled apps
+                if (idx == win.pick_pos):
+                    wraps = self.get_folded_synopsis(first_synopsis_offset, fold_offset, ns.synopsis)
+                    line += wraps[0]
+                else:
+                    line += ns.synopsis 
+
+                win.add_body(line, context=Context("uninstalled", info=ns))
+
+                if (idx == win.pick_pos):
+                    self.add_folded_synopsis_lines(fold_offset, wraps)
+
+                idx += 1
 
         #############################################
         # Create HEADER LINES
@@ -159,7 +240,7 @@ class HomeScreen(VappmanScreen):
             # mode = 'Sys' if app.opts.in_system_mode else 'Usr'
             header2 = f' #:maxBkUp={app.opts.max_backups}   '
             if context.genre == 'installed':
-                header2 += ' [r]mv [u]pd C:icons [b]kup'
+                header2 += ' [r]mv [u]pd C:icons [b]kup [a]bout'
                 cnt = len(app.appman.get_snapshots(
                             context.info.appname, app.opts.max_backups))
                 if cnt:
@@ -177,7 +258,7 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'installed':
-            self.app.run_appman(verb, context.info.appname)
+            self.app.run_appman(verb, context.info)
 
     def remove_ACTION(self):
         """ TBD """
@@ -214,7 +295,7 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         context = self.win.get_picked_context()
         if context:
-            self.app.run_appman('about', context.info.appname)
+            self.app.run_appman('about', context.info)
 
     def test_ACTION(self):
         """ TBD """
@@ -235,7 +316,7 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'uninstalled':
-            self.app.run_appman('install', context.info.appname)
+            self.app.run_appman('install', context.info)
 
     #################################
     def reinstall_ACTION(self):
@@ -262,16 +343,15 @@ class HomeScreen(VappmanScreen):
     def escape_filter_ACTION(self):
         """ Clear filter and jump to top """
         app = self.app
-        app.prev_filter = ''
+        app.search_bar._text = ''  # Clear search bar text
         app.filter = None
         app.win.pick_pos = 0
 
     def slash_ACTION(self):
         """ Enter search-as-you-type mode """
         app = self.app
-        app.start_filter = app.prev_filter
-        app.search_mode = True
-        app.search_cursor_pos = len(app.prev_filter)
+        # Start search with current filter text
+        app.search_bar.start(app.search_bar.text)
         # Enable pass-through mode so all printable keys are returned
         app.win.passthrough_mode = True
         return None
@@ -304,17 +384,20 @@ class Vappman(Prerequisites):
         self.check_preqreqs()
         print(f'{self.has_am=}')
         print(f'{self.has_appman=}')
-        self.disk_state = PersistentState(
-                    'vappman', max_backups=1, install_opts='')
+        self.disk_state = PersistentState('vappman',
+                      max_backups=1, install_opts='', database='vm')
         self.appman = AppmanVars()
         self.launcher = AppmanLauncher(self.appman)
 
         self.actions = {} # currently available actions
-        self.prev_filter = '' # string
         self.filter = None # compiled pattern
-        self.search_mode = False # True when in search-as-you-type mode
-        self.search_cursor_pos = 0 # cursor position within search string
-        self.start_filter = '' # filter value when entering search mode
+
+        # Initialize incremental search bar with callbacks
+        self.search_bar = IncrementalSearchBar(
+            on_change=lambda text: self.compile_filter(text),
+            on_accept=lambda text: self._on_search_accept(text),
+            on_cancel=lambda text: self._on_search_cancel(text)
+        )
         # self.basics, _ = self.cmd_dict('list')
         self.terminal_emulator = None
         self.has_am = None
@@ -360,7 +443,7 @@ class Vappman(Prerequisites):
         spin.add_key('max_backups', '# - max backups per app', vals=[-1, 2, 1])
         self.opts.max_backups = self.disk_state.max_backups
         self.opts.install_opts = self.disk_state.install_opts
-        self.opts.database = 'am'
+        self.opts.database = self.disk_state.database
 
 
         spin.add_key('sync', 's - sync (update appman itself)', genre='action')
@@ -517,7 +600,7 @@ class Vappman(Prerequisites):
         if self.ss.stack:
             return self.navigate_back()
         # If no stack, clear filter and jump to top
-        self.prev_filter = ''
+        self.search_bar._text = ''
         self.filter = None
         self.win.pick_pos = 0
         return True
@@ -544,41 +627,9 @@ class Vappman(Prerequisites):
 
             if key is not None:
                 # Handle search mode keys first (MUST be before spin.do_key)
-                if self.search_mode:
-                    if key in [10, 13]:  # ENTER - accept search
-                        self.search_mode = False
-                        win.passthrough_mode = False  # Disable pass-through
-                        self.compile_filter(self.prev_filter)
-                        if self.start_filter != self.prev_filter:
-                            win.pick_pos = 0  # Move to top when filter changes
-                    elif key == 27:  # ESC - cancel search, restore old pattern
-                        self.prev_filter = self.start_filter
-                        self.search_mode = False
-                        win.passthrough_mode = False  # Disable pass-through
-                        self.compile_filter(self.prev_filter)
-                    elif key in [cs.KEY_BACKSPACE, 127, 8, 263]:  # Backspace (multiple codes)
-                        if self.search_cursor_pos > 0:
-                            chars = list(self.prev_filter)
-                            chars.pop(self.search_cursor_pos - 1)
-                            self.prev_filter = ''.join(chars)
-                            self.search_cursor_pos -= 1
-                            self.compile_filter(self.prev_filter)
-                    elif key == cs.KEY_LEFT:  # Left arrow
-                        if self.search_cursor_pos > 0:
-                            self.search_cursor_pos -= 1
-                    elif key == cs.KEY_RIGHT:  # Right arrow
-                        if self.search_cursor_pos < len(self.prev_filter):
-                            self.search_cursor_pos += 1
-                    elif key == cs.KEY_HOME or key == 1:  # Home or Ctrl-A
-                        self.search_cursor_pos = 0
-                    elif key == cs.KEY_END or key == 5:  # End or Ctrl-E
-                        self.search_cursor_pos = len(self.prev_filter)
-                    elif 32 <= key <= 126:  # Printable characters
-                        chars = list(self.prev_filter)
-                        chars.insert(self.search_cursor_pos, chr(key))
-                        self.prev_filter = ''.join(chars)
-                        self.search_cursor_pos += 1
-                        self.compile_filter(self.prev_filter)
+                if self.search_bar.handle_key(key):
+                    # Key was handled by search bar, skip normal processing
+                    pass
                 else:
                     # Normal mode - let OptionSpinner process the key
                     self.spin.do_key(key, win)
@@ -592,6 +643,18 @@ class Vappman(Prerequisites):
                     self.ss.perform_actions(self.spin)
 
             win.clear()
+
+    def _on_search_accept(self, text):
+        """Callback when search is accepted (ENTER pressed)"""
+        self.win.passthrough_mode = False
+        # Jump to top if filter changed
+        if self.search_bar._start_text != text:
+            self.win.pick_pos = 0
+
+    def _on_search_cancel(self, text):
+        """Callback when search is cancelled (ESC pressed)"""
+        self.win.passthrough_mode = False
+        # Filter already restored by on_change callback
 
     def compile_filter(self, pattern):
         """Compile filter pattern and update display immediately"""
@@ -612,34 +675,27 @@ class Vappman(Prerequisites):
         """ Build header line with fancy formatting markup (static actions only) """
         # Static actions with markup for fancy headers
         line = f'[s]ync [c]lean [U]pd [R]eInst [q]uit ?:help  [d]b={self.opts.database}'
-        # Only show filter pattern if it's non-empty
-        if self.search_mode:
-            # In search mode, show cursor position with | and add spaces around pattern
-            # to prevent it from being treated as a search pattern by fancy_header
-            before = self.prev_filter[:self.search_cursor_pos]
-            after = self.prev_filter[self.search_cursor_pos:]
-            # Add space after / to break pattern matching in fancy_header
-            line += f' / {before}|{after}'
-        elif self.prev_filter:
-            line += f' /{self.prev_filter}'
+        # Add search bar display string
+        line += self.search_bar.get_display_string(prefix=' /')
         line += '  '
         return line
 
 
-    def run_appman(self, subcommand: str, app: str = None):
+    def run_appman(self, subcommand: str, info: SimpleNamespace = None):
         """ Run an 'appman' command using subprocess. """
 
+        appname = info.appname if info else None
         # 1. Build the command list
-        if self.has_appman:
-            cmd = ['appman']
-        else:
-            cmd = ['am']
+        cmd = ['appman' if self.has_appman else 'am']
         cmd.append(subcommand)
         if subcommand == 'install':
-            for opt in self.opts.install_opts.split(','):
-                cmd.append(f'--{opt}')
-        if app:
-            cmd.append(app)
+            for opt in self.opts.install_opts.strip().split(','):
+                if opt:
+                    cmd.append(f'--{opt}')
+            if info and info.db != 'am':
+                appname += f'.{info.db}'
+        if appname:
+            cmd.append(appname)
 
         # 2. Stop curses environment
         ConsoleWindow.stop_curses()
