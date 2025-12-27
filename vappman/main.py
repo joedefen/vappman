@@ -1,24 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Interactive, visual thin layer atop appman
+Interactive, visual thin layer atop appman/am
 
-TODOs:
--   Feature	appman  CLI	            vappman Status	Re-announcement Value
--   Bootstrapping	N/A	            Missing	        Critical (Ease of use)
--   Sandboxing	    -ias	        Missing	        High (Security)
--   NeoDB Support	--soarpkg, etc.	Missing	        Medium (Content)
--   Snapshots	    -b, -o	        Partially (Manual)	High (Safety)
--   Icon Theme      Sync	--icons	Missing	        Low (Aesthetics)
-
-**"vappman 1.0: The Bridge to the Unified AM Ecosystem"**
-
-* **Intelligent Auto-Discovery:** No more manual configuration. `vappman` automatically detects if you're using `am` (System) or `appman` (User) and adapts the UI.
-* **The 'Safe-Sudo' Flow:** It only asks for root permissions when you are performing a system-wide action. Your TUI remains unprivileged and safe.
-* **Unified App View:** See your system-wide apps and local apps in one scannable list, with visual indicators for where they are stored.
-* **Seamless Onboarding:** Don't have the manager? `vappman` will bootstrap the official environment for you with one click.
-
-**Would you like me to draft the "Bootstrap" logic code for you, so you can see how `vappman` would offer to install the manager if it's missing?**
 """
 # pylint: disable=broad-exception-caught,consider-using-with
 # pylint: disable=too-many-instance-attributes,too-many-branches
@@ -77,7 +61,7 @@ class HomeScreen(VappmanScreen):
         return whether sandboxed """
         return bool(info and info.app_type and '🔒' in info.app_type)
 
-    def add_folded_synopsis_lines(self, fold_offset, wrapped_lines, max=1, corner=True):
+    def add_folded_synopsis_lines(self, fold_offset, wrapped_lines, max=1):
         """
         Add wrapped synopsis continuation lines as TRANSIENT context lines.
 
@@ -94,12 +78,10 @@ class HomeScreen(VappmanScreen):
         :param max: Maximum number of continuation lines to display (default: 1)
         """
         def make_indent(amount, corner):
-            rv = ''
-            if amount > 19:
-                rv = ' ' * 15
-                rv += '╰──' if corner else '│'
-                amount -= 18 if corner else 16
-            rv += ' '*amount
+            rv = ' '*4
+            if amount > 6:
+                rv = ' ' * (amount-5)
+                rv += ' ╰── ' if corner else ' │    '
             return rv
 
         win = self.win
@@ -111,7 +93,7 @@ class HomeScreen(VappmanScreen):
         for line in lines[:-1]:
             # Indent to fold_offset position
             win.add_body(indent + line, context=Context("TRANSIENT"))
-        indent = make_indent(2+fold_offset, corner)
+        indent = make_indent(2+fold_offset, True)
         if len(lines) > 0:
             win.add_body(indent + wrapped_lines[-1], context=Context("TRANSIENT"))
             
@@ -159,7 +141,7 @@ class HomeScreen(VappmanScreen):
             title = 'm:AM-SYSTEM' if app.opts.in_system_mode else 'm:AM-USER'
             if app.appman.is_system_mode() != app.opts.in_system_mode:
                 app.appman.set_system_mode(app.opts.in_system_mode)
-                app.installs = app.get_installed()
+                app.installs, app.installs_by_appname = app.get_installed(repull=False)
         # Save persistent state if any options changed
         app.disk_state.save_if_changed(app.opts)
 
@@ -193,9 +175,11 @@ class HomeScreen(VappmanScreen):
                 win.add_body(line, context=Context(status, info=ns))
 
                 if (idx == win.pick_pos):
-                    self.add_folded_synopsis_lines(fold_offset, wraps, corner=False)
-                    line = f'{"":<13}  ╰── {ns.version} {ns.app_type}'
-                    win.add_body(line, context=Context("TRANSIENT"))
+                    #wraps.append(f'🅥 {ns.version} {ns.app_type}')
+                    wraps.append(f'🠞 {ns.version} {ns.app_type}')
+                    self.add_folded_synopsis_lines(fold_offset, wraps, max=2)
+                    # line = f'{"":<13}  ╰── {ns.version} {ns.app_type}'
+                    # win.add_body(line, context=Context("TRANSIENT"))
                 idx += 1
 
         #############################################
@@ -250,7 +234,11 @@ class HomeScreen(VappmanScreen):
                 header2 += ' S:' + ('unbox' if sandboxed else 'box')
                 header2 += ' [t]est'
             elif context.genre == 'uninstalled':
-                header2 += f' [i]nstall O:opts={app.opts.install_opts}'
+                conflicts = app.installs_by_appname.get(context.info.appname, None)
+                if conflicts:
+                    header2 += f' install-conflicts={conflicts}'
+                else:
+                    header2 += f' [i]nstall O:opts={app.opts.install_opts}'
         
         win.add_fancy_header(header2, app.opts.fancy_header)
                 
@@ -407,13 +395,14 @@ class Vappman(Prerequisites):
         self.cache_mgr = AppCacheManager()
         self.apps_to_list = self.cache_mgr.get_apps()
         self.apps_by_name_db = self.cache_mgr.apps_by_key
-        self.installs = self.get_installed() # dict keyed by app
+        self.saved_outputs = {}
+        self.installs, self.installs_by_appname = self.get_installed() # dict keyed by app
 
         win_opts = ConsoleWindowOpts()
         win_opts.head_line=True
         win_opts.body_rows=len(self.apps_by_name_db)+1000
         win_opts.head_rows = 10
-        # win_opts.pick_attr = cs.A_BOLD|cs.A_UNDERLINE
+        win_opts.pick_attr = cs.A_BOLD|cs.A_UNDERLINE
         win_opts.dialog_abort = True
         win_opts.ctrl_c_terminates = False
         win_opts.min_cols_rows = (60, 10)
@@ -474,14 +463,14 @@ class Vappman(Prerequisites):
         self.win.set_handled_keys(self.spin)
 
 
-    def cmd_dict(self, cmd, start=r'\s*◆\s'):
+    def cmd_dict(self, cmd, start=r'\s*◆\s', repull=True):
         """ Get lines with the given start put into a dict keyed by the
             1st word.
         """
         def parse_app_list(lines):
             nonlocal current_in_user_mode
-            installs, basics = {}, {}
-            where = None
+            installs, installs_by_appname = {}, {}
+            local = False
             
             # Process line by line
             # lines = input_text.strip().split('\n')
@@ -490,7 +479,7 @@ class Vappman(Prerequisites):
                 line = line.strip()
                 # Determine to reset location (Global vs Local)
                 if 'HAVE INSTALLED' in line:
-                    where = None # Cannot trust what is said
+                    local = bool('LOCAL' in line)
                     
                 # Identify data lines (they start with the diamond symbol ◆)
                 if line.startswith('◆'):
@@ -508,76 +497,81 @@ class Vappman(Prerequisites):
                         app_type = parts[2+db_adj]
                         # size = parts[3+db_adj]
 
-                        location = self.appman.where_is(name)
-                        where = 'S' if location.sys_path else ''
-                        where += 'U' if location.usr_path else ''
+                        where = 'S' if not local else ''
+                        where += 'U' if local else ''
                         
                         # Store as a SimpleNamespace for dot-notation access
                         ns = installs.get((name, db), None)
                         if ns:  # we have both user and system apps
-                            if current_in_user_mode:
+                            if current_in_user_mode and local:
                                 ns.version=version
+                            ns.where += where
                         else:
                             installs[(name,db)] = SimpleNamespace(appname=name, db=db,
                                         version=version, app_type=app_type,
                                         where=where, synopsis=None, raw=line)
-#                   else:
-#                       mat = re.match(r'\s*([^\s]+)\s+:\s+([^\s].*)', line[1:])
-#                       if mat:
-#                           name = mat.group(1)
-#                           basics[name] = SimpleNamespace(name=name,
-#                                   synopsis=mat.group(2), raw=line)
-                        
-            return installs
+
+                        if name in installs_by_appname:
+                            installs_by_appname[name].add(db)
+                        else:
+                            installs_by_appname[name] = set([db])
+
+            return installs, installs_by_appname
         # Define the command to run
         command = ['appman' if self.has_appman else 'am']
         command += cmd.split()
-        current_in_user_mode = None
-        if 'files' in cmd.split():
-            current_in_user_mode = self.appman.is_user_mode()
-            if current_in_user_mode is True:
-                # temp: promote to system mode to get all apps
-                self.appman.set_system_mode(True)
+        output_key = ' '.join(command)
 
-        # Run the command and capture the output
-        try:
-            # Capture as bytes first, then decode with error handling
-            result = subprocess.run(command, stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE, check=False)
-        except Exception as exc:
-            ConsoleWindow.stop_curses()
+        output = self.saved_outputs.get(output_key, None)
+        if repull or not output:
+            current_in_user_mode = None
+            if 'files' in cmd.split():
+                current_in_user_mode = self.appman.is_user_mode()
+                if current_in_user_mode is True:
+                    # temp: promote to system mode to get all apps
+                    self.appman.set_system_mode(True)
+
+            # Run the command and capture the output
+            try:
+                # Capture as bytes first, then decode with error handling
+                result = subprocess.run(command, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, check=False)
+            except Exception as exc:
+                ConsoleWindow.stop_curses()
+                if current_in_user_mode is True:
+                    self.appman.set_system_mode(False)
+                print(f'FAILED: {command}: {exc}')
+                sys.exit(1)
             if current_in_user_mode is True:
                 self.appman.set_system_mode(False)
-            print(f'FAILED: {command}: {exc}')
-            sys.exit(1)
-        if current_in_user_mode is True:
-            self.appman.set_system_mode(False)
 
-        if result.returncode != 0:
-            print(f'WARNING: {command}: {result.returncode=}')
+            if result.returncode != 0:
+                print(f'WARNING: {command}: {result.returncode=}')
 
-        # Decode with multiple fallback strategies
-        try:
-            output = result.stdout.decode('utf-8', errors='replace')
-        except Exception:
+            # Decode with multiple fallback strategies
             try:
-                output = result.stdout.decode('latin-1', errors='replace')
+                output = result.stdout.decode('utf-8', errors='replace')
             except Exception:
-                output = str(result.stdout, errors='replace')
+                try:
+                    output = result.stdout.decode('latin-1', errors='replace')
+                except Exception:
+                    output = str(result.stdout, errors='replace')
+            if output:
+                self.saved_outputs[output_key] = output
 
         lines = output.splitlines()
         # ansi_escape_pattern = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
         rv = parse_app_list(lines)
         return rv
 
-    def get_installed(self):
+    def get_installed(self, repull=True):
         """ Get the list of lines of installed apps """
-        rv = self.cmd_dict('files --byname')
+        rv, installs_by_appname = self.cmd_dict('files --byname', repull=repull)
         for app_db_key, info in rv.items():
             basic = self.apps_by_name_db.get(app_db_key, None)
             if basic:
                 info.synopsis = basic.synopsis
-        return rv
+        return rv, installs_by_appname
 
     def navigate_to(self, screen_num):
         """Navigate to a screen with validation hooks."""
@@ -618,7 +612,7 @@ class Vappman(Prerequisites):
             key = win.prompt(seconds=self.next_prompt_seconds[0])
             if self.cache_mgr.check_for_updates(): # this happens once at most
                 self.apps_by_name_db = self.cache_mgr.apps_by_key
-                self.installs = self.get_installed()
+                self.installs, self.installs_by_appname = self.get_installed(repull=False)
 
             # Adjust prompt timing (fast initially, then slower)
             self.next_prompt_seconds.pop(0)
@@ -725,7 +719,7 @@ class Vappman(Prerequisites):
         input('\n\n===== Press ENTER to return to vappman ====> ')
 
         # 6. Update installs and restart curses environment
-        self.installs = self.get_installed()
+        self.installs, self.installs_by_appname = self.get_installed()
         ConsoleWindow._start_curses()
 
 def main():

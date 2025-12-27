@@ -1,14 +1,44 @@
-# vappman
-`vappman` presents a visual (curses) interface to `appman`.
+## vappman
+`vappman` presents a "visual" (or TUI) interface to `appman/am`.
 
-Why use `vappman`? Browse 2000+ apps interactively with mouse/keyboard, filter by keywords or regex to rapidly find apps, and see installed vs. available at a glance. CLI option memorization is not required because context-sensitive keys guide you through the life cycle of your AppImages including installing, updating, and removing.
+Why use `vappman/am`? Browse 2000+ apps interactively with mouse/keyboard, filter by keywords or regex to rapidly find apps, and see installed vs. available at a glance. CLI option memorization is not required because context-sensitive keys guide you through the life cycle of your AppImages including installing, updating, and removing.
 
+#### Prerequisites
+* Install [ivan-hc/AppMan: AppImage package manager to install, update (for real) and manage ALL of them](https://github.com/ivan-hc/AppMan) and all of its prerequisites.
+* **Note**: `vappman` can help install `am` or `appman` and their required dependencies on first startup, making it easier to get started.
 
-* Install `vappman` using `pipx install vappman`, or however you do so.
-* Prerequisites: install [ivan-hc/AppMan: AppImage package manager to install, update (for real) and manage ALL of them](https://github.com/ivan-hc/AppMan) and all of its prerequisites.
+#### Installation
+* Install `vappman` using `pipx install vappman` (recommended)
+* Alternative: `pip install vappman` or install from source
 
-NOTE: `vappman` covers many capabilities of appman:
-* implicitly, (-f) files (or show installed), (-l) list available apps, and (-q) search the app list
+#### Key Features (Added in V2)
+
+* **Dual Mode Support**: Works with both `am` (system-wide) and `appman` (user-local). One key (`m`) switches instantly between user (local install) and system (non-local install) modes when using `am`.
+* **Multi-Database Support**: Access all of `am`'s app databases including:
+  * `am` - Main AppImage database with 2000+ portable Linux applications
+  * `busybox` - Minimal Unix utilities as AppImages
+  * `appbundle` - AppBundle format packages (portable application bundles)
+  * `python` - Python interpreters (multiple versions available as AppImages)
+  * `soarpkg` - [Soar User Repository](https://github.com/pkgforge/soarpkgs) packages (portable, distro-independent binaries)
+  * `ALL` - Combined view of all databases for comprehensive app browsing
+* **Smart Backup Management**:
+  * Reports the number of backups when offering to restore (a.k.a., overwrite) installed apps
+  * Automatically clean up superfluous backups with configurable retention (2, 1, or unlimited)
+* **Flexible Install Options**:
+  * `--icons` - Use system icon themes instead of bundled icons
+  * `--sandbox` - Run AppImage in sandboxed environment for security
+  * Mix and match options per app
+* **Incremental Search**: Type-as-you-go filtering with instant feedback showing match effectiveness
+* **Enhanced Display**: For selected apps, shows full synopsis (if multi-line), current version, and app type
+* **Persistent Preferences**: Remembers your settings between sessions:
+  * Default install options (--icons, --sandbox)
+  * Preferred database selection
+  * Maximum backups per application
+
+#### Supported `am/appman` Operations
+
+`vappman` covers many capabilities of `am/appman`:
+* (-f) files (or show installed), (-l) list available apps, and (-q) search the app list
 * (-i) installing uninstalled apps
 * (-r) removing installed apps
 * (-b) backup / (-o) overwrite of installed apps
@@ -18,7 +48,7 @@ NOTE: `vappman` covers many capabilities of appman:
   *  `U` to update all installed apps
   *  `R` to reinstall all apps with altered install scripts since last install
 
-But it does NOT cover:
+**Not covered** (use `am/appman` directly for these):
 * (-d) download install script
 * (-h) help or full help for appman
 * (-H) home or set $HOME directory for apps
@@ -26,49 +56,116 @@ But it does NOT cover:
 * (-v) version of appman
 * --force-latest to get the most recent stable release AND all other options and unmentioned commands.
   
-## Usage
-* Run `vappman` from the command line.
-* It presents some keys available on the top line.
-    * Use '?' to learn the navigation keys (e.g., you can use the mouse wheel, arrow keys, and many `vi`-like keys)
-    * '?' also elaborates the meaning of the available keys for operations.
-    * NOTE: `ENTER` acts differently based on context:
-      * In help, it returns to the main menu.
-      * On an uninstalled app, it installs it.
-      * On an installed app, it uninstalls it.
-* Then `vappman` presents a list of installed apps, followed by available/uninstalled apps.
-    * Installed apps have prefix '✔✔✔' (i.e., three checks).
-    * Uninstalled apps have prefix '◆' (i.e., a solid diamond).
-* Enter `/` to enter a "filter" for installed/uninstalled apps, if you wish.
-    * If you enter plain ole "words", then those words must match:
-      * the start of words on the apps line (in order, but not contiguously) and/or
-      * the start of the remainder of the previous word match (i.e., `/bit fight` matches `bitfighter`).
-    * Or you can enter an regular expression acceptable to python; e.g.,
-      * `^` matches the line starting with the app name
-      * `\b` matches a word boundary; and so forth.
-    * NOTES:
-      * `ESC` clears the filter and jumps to the top of the listing.
-      * Each time the filter is changed, the position jumps to the top of the listing.
-* Use `i` to install apps, and `r` to remove apps.  When you install or remove an app, `appman` drops out of `curses` mode, runs the `appman` command so you can see the result, and then prompts you to hit ENTER to return to `vappman`.
-* Use `s` to sync (update appman itself).
-* Use `t` to "test" an installed app.  This launches a terminal emulator and then the app so you can see issues. This is not for daily use obviously, but for after install or when having unknown issues and you wish to start the investigation.
-  * You must have one of these terminal emulators (and they are searched for in order): konsole, gnome-terminal, xfce4-terminal, lxterminal, alacritty, guake, tilix, sakura, terminator, or kitty.
+#### Usage
+Run `vappman` from the command line. You will see a screen similar to this:
 
-## Example Screenshot (of v0.9 ... current release will vary slightly)
-![vappman-with-filter](https://github.com/joedefen/vappman/blob/main/images/vappman-with-filter.png?raw=true).
+```
+ m:AM-SYSTEM  [s]ync [c]lean [U]pd [R]eInst [q]uit ?:help  [d]b=ALL
+  #:maxBkUp=1    [r]mv [u]pd C:icons [b]kup [a]bout S:unbox [t]est
+─────────────────────────────────────────────────────────────────────────────────
+>🔒─U onlyoffice ﹫am     Office Suite with full support for MS Windows formats
+                     │    and cloud.
+                     ╰── 🠞 9.2.0 appimage🔒
+  ✔─U sas ﹫am            Tool to sandbox AppImages with bubblewrap easily.
+  ✔─U signal ﹫am         Unofficial AppImage package for Signal (communication).
+  ✔─U simplescreenrecorder ﹫am Unofficial. Feature-rich screen recorder supporti
+  ✔─U ventoy ﹫am         Tool to create bootable USB drive for ISO/WIM/IMG/VHDx/
+  ✔─U xnviewmp ﹫am       Graphic viewer, browser, converter.
+  ✔─U zoom ﹫am           Unofficial. Video Conferencing and Web Conferencing Ser
+    ◆ 0ad-prerelease @am  Unofficial. FOSS historical Real Time Strategy, RTS gam
+    ◆ 0ad @am             Unofficial. FOSS historical Real Time Strategy, RTS gam
+    ◆ 2ship @am           2 Ship 2 Harkinian game.
+    ◆ 2to3 @soarpkg       Python2 to Python3 converter [python3].
+```
 
----
+**Display Symbols Legend:**
+* `✔` - Installed app (not sandboxed)
+* `🔒` - Installed app (sandboxed)
+* `◆` - Uninstalled/available app
+* `S` - Installed system-wide (requires root)
+* `U` - Installed in user space (local)
+* `﹫` - Database indicator (in multi-database view)
+* `>` - Currently selected app
 
-NOTES: in this example:
-* keys to the left of `❚` apply to the highlighted app; keys to the right apply globally.
-* the filter is `card` so it shows app lines with words starting with `card`.
-* the reverse video, current position is on `glabels`;
-  thus if `i` (or ENTER) is typed, `appman install glabels` is run.
-* if the horizontal line (second line show) has no decorations, then you are looking
-  all the filtered apps; otherwise, the decoration suggests where you are in the
-  partial view of the filtered apps.
-* the matching installed app has the '✔✔✔' prefix.
-* the fixed top line shows mos of the available action keys (e.g., `q` quits the app)
-* use `?` to open the help screen describing all keys (including navigation)
+#### Global Keys (Top Line)
 
-## Screen Recording (Intro to vappman based on v0.9)
-[![Screen Recording](https://i9.ytimg.com/vi_webp/NUHYN9_DZtA/mq3.webp?sqp=CMTu4LMG-oaymwEmCMACELQB8quKqQMa8AEB-AHqBYAC4AOKAgwIABABGEogZShRMA8=&rs=AOn4CLBaBrOpAhJkRIQQNNdCzYaqpOYl-Q)](https://www.youtube.com/watch?v=fC2EYMMcMQk)
+* `m` - Switch mode if using `am`, toggling between SYSTEM and USER mode
+* `s` - Sync (update appman itself)
+* `c` - Clean up (remove unnecessary files and folders)
+* `U` - Update ALL installed apps
+* `R` - Reinstall ALL apps with changed installation scripts (`am` database only)
+* `q` or `x` - Quit `vappman`
+* `?` - Show help screen with all keys including navigation keys
+* `d` - Cycle through app database choices; `ALL` shows all databases in a combined view
+* `/` - Start incremental search filter for apps
+* `ESC` - Clear filter and jump to top of listing
+* `_` - Toggle fancy header mode (Underline/Reverse/Off)
+* `*` - Toggle demo mode
+* `#` - Change number of backups to keep (2, 1, or -1 for infinite)
+
+#### Navigation Keys
+
+Press `?` to see full navigation help. Common keys include:
+* Arrow keys, Page Up/Down, Home/End - Navigate the app list
+* Mouse wheel - Scroll through apps
+* Vi-like keys: `j`/`k` (down/up), `g`/`G` (top/bottom), `Ctrl-f`/`Ctrl-b` (page down/up)
+* `ENTER` - Context-sensitive action:
+  * On uninstalled app: Install it
+  * On installed app: Uninstall it
+  * In help screen: Return to main menu
+
+#### Search/Filter Syntax
+
+Press `/` to start filtering. The filter supports two modes:
+
+**Plain Word Matching** (default for simple text):
+* Words must match the start of words in the app line (in order, but not contiguously)
+* Example: `/bit fight` matches `bitfighter`
+* Example: `/term edit` matches "terminal editor"
+
+**Regular Expression Mode** (detected automatically):
+* Use Python regex syntax for advanced patterns
+* `^` - Match line starting with app name
+* `\b` - Match word boundary
+* Example: `/^vim` - Apps starting with "vim"
+* Example: `/\bweb\b` - Apps with whole word "web"
+
+**Filter Controls:**
+* `ENTER` - Accept filter and return to browsing
+* `ESC` - Cancel filter edit (restores previous filter)
+* Typing updates results in real-time
+
+#### App-Specific Keys (Second Line)
+
+**For UNINSTALLED apps:**
+* `i` or `ENTER` - Install the app
+* `O` - Cycle through install options:
+  * `` (none) - Default install
+  * `icons` - Use system icon themes
+  * `sandbox` - Run in sandboxed environment
+  * `icons,sandbox` - Both options
+* **Note**: If an app with the same name is installed from another database, you'll see a conflict warning instead of install keys
+
+**For INSTALLED apps:**
+* `r` or `ENTER` - Remove the app
+* `u` - Update this app
+* `C` - Change AppImage to use system icons
+* `a` - Show "about" information from `am/appman`
+* `S` - Toggle sandbox mode (box/unbox)
+* `b` - Backup the app
+* `o` - Overwrite app from its backup (shows count of available backups)
+* `t` - Test the app by running it in a terminal
+
+#### App List Display
+
+The main screen shows installed apps first (marked with `✔` or `🔒`), followed by available/uninstalled apps (marked with `◆`).
+
+When you install or remove an app, `vappman` temporarily exits the TUI, runs the `am/appman` command so you can see the result, then prompts you to press ENTER to return.
+
+#### Testing Apps
+
+Use `t` to test an installed app. This launches a terminal emulator and runs the app so you can see any console output or errors. Useful for troubleshooting after installation.
+
+**Supported terminal emulators** (searched in this order):
+`konsole`, `gnome-terminal`, `xfce4-terminal`, `lxterminal`, `alacritty`, `guake`, `tilix`, `sakura`, `terminator`, `kitty`
+
