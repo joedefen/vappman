@@ -1,7 +1,7 @@
 ## vappman
 `vappman` presents a "visual" (or TUI) interface to `appman/am`.
 
-Why use `vappman/am`? Browse 2000+ apps interactively with mouse/keyboard, filter by keywords or regex to rapidly find apps, and see installed vs. available at a glance. CLI option memorization is not required because context-sensitive keys guide you through the life cycle of your AppImages including installing, updating, and removing.
+**Why use `vappman`?** Browse 2000+ apps interactively with mouse/keyboard, filter by keywords or regex to rapidly find apps, and see installed vs. available at a glance. CLI option memorization is not required because context-sensitive keys guide you through the life cycle of your AppImages including installing, updating, and removing.
 
 #### Prerequisites
 * Install [ivan-hc/AppMan: AppImage package manager to install, update (for real) and manage ALL of them](https://github.com/ivan-hc/AppMan) and all of its prerequisites.

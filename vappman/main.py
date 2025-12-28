@@ -520,12 +520,11 @@ class Vappman(Prerequisites):
         command = ['appman' if self.has_appman else 'am']
         command += cmd.split()
         output_key = ' '.join(command)
+        current_in_user_mode = self.appman.is_user_mode()
 
         output = self.saved_outputs.get(output_key, None)
         if repull or not output:
-            current_in_user_mode = None
             if 'files' in cmd.split():
-                current_in_user_mode = self.appman.is_user_mode()
                 if current_in_user_mode is True:
                     # temp: promote to system mode to get all apps
                     self.appman.set_system_mode(True)
