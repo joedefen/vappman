@@ -5,7 +5,7 @@
 
 #### Prerequisites
 * Install [ivan-hc/AppMan: AppImage package manager to install, update (for real) and manage ALL of them](https://github.com/ivan-hc/AppMan) and all of its prerequisites.
-* **Note**: `vappman` can help install `am` or `appman` and their required dependencies on first startup, making it easier to get started.
+* **Note**: to make it easier,`vappman` offers to install `am` or `appman` and their required dependencies if missing on startup.
 
 #### Installation
 * Install `vappman` using `pipx install vappman` (recommended)
@@ -34,6 +34,7 @@
   * Default install options (--icons, --sandbox)
   * Preferred database selection
   * Maximum backups per application
+* **AppImage Compatibility Checking**: Automatic system checks for common AppImage issues (libfuse2, user namespaces, etc.) with distro-specific fix suggestions
 
 #### Supported `am/appman` Operations
 
@@ -55,7 +56,9 @@
 * (-t) template for custom install template
 * (-v) version of appman
 * --force-latest to get the most recent stable release AND all other options and unmentioned commands.
-  
+
+---
+
 #### Usage
 Run `vappman` from the command line. You will see a screen similar to this:
 
@@ -164,8 +167,78 @@ When you install or remove an app, `vappman` temporarily exits the TUI, runs the
 
 #### Testing Apps
 
-Use `t` to test an installed app. This launches a terminal emulator and runs the app so you can see any console output or errors. Useful for troubleshooting after installation.
+Use `t` to test an installed app. This launches a terminal emulator and runs the app so you can see any console output or errors. Useful for go/no-go check after installation.
 
 **Supported terminal emulators** (searched in this order):
 `konsole`, `gnome-terminal`, `xfce4-terminal`, `lxterminal`, `alacritty`, `guake`, `tilix`, `sakura`, `terminator`, `kitty`
+
+---
+
+#### Checking AppImage Compatibility
+
+`vappman` automatically checks your system for common AppImage compatibility issues on startup. If critical issues are found, it displays them before launching the TUI and pauses for 3 seconds so you can read the warnings. You'll see something like:
+```
+AppImage compatibility check:
+  ✓ libfuse2: OK
+  ✓ user namespaces: OK
+  ✓ /tmp noexec: OK
+  ✓ AppArmor: OK
+```
+
+**Run Detailed Check**
+Run `vappman --doctor` for these checks:
+1. **libfuse2** - Required library for most AppImages (critical)
+   - Ubuntu 22.04+ doesn't include this by default
+   - Fix: `sudo apt install libfuse2` (Ubuntu/Debian)
+1. **User namespaces** - Needed for sandboxed AppImages (warning)
+   - Sometimes disabled for security on Ubuntu-based systems
+   - Fix: `sudo sysctl -w kernel.unprivileged_userns_clone=1`
+1. **/tmp noexec** - Prevents AppImages from executing (critical)
+   - Some systems mount /tmp with noexec flag
+   - Fix: `sudo mount -o remount,exec /tmp` or set `TMPDIR=$HOME/tmp`
+1. **AppArmor** - May block some AppImages (info, Ubuntu/Debian)
+   - Active AppArmor profiles can restrict AppImage execution
+   - Check logs if AppImages fail: `sudo dmesg | grep -i apparmor`
+1. **SELinux** - May block AppImages (warning, Fedora/RHEL/CentOS)
+   - Enforcing mode can prevent AppImage execution or resource access
+   - Check logs: `sudo ausearch -m avc -ts recent`
+   - Temporary fix: `sudo setenforce 0`
+
+**Command-line options:**
+```bash
+vappman --check-appimage  # Run detailed system check
+vappman --doctor          # Alias for --check-appimage
+vappman --no-startup-check  # Skip automatic check on startup
+vappman --help            # Show all options
+```
+
+**Example output when issues are found:**
+```
+AppImage Compatibility Check (Ubuntu 24.04 LTS)
+============================================================
+  ✗ libfuse2: libfuse2 is not installed (required for most AppImages)
+    Fix: sudo apt install libfuse2
+  ⚠ user namespaces: Unprivileged user namespaces are disabled
+  ✓ /tmp noexec: OK
+  ✓ AppArmor: OK
+
+Detailed Information:
+------------------------------------------------------------
+
+✗ libfuse2:
+  libfuse2 is not installed (required for most AppImages)
+  Fix: sudo apt install libfuse2
+
+⚠ user_namespaces:
+  Unprivileged user namespaces are disabled (sandboxed AppImages will fail)
+  Suggestion: sudo sysctl -w kernel.unprivileged_userns_clone=1
+  To make permanent: echo "kernel.unprivileged_userns_clone=1" | sudo tee /etc/sysctl.d/00-local-userns.conf
+```
+
+The compatibility checker is **distro-aware** and provides appropriate fix commands for:
+- Ubuntu/Debian (apt)
+- Fedora/RHEL (dnf)
+- Arch/Manjaro (pacman)
+- openSUSE (zypper)
+- And more
 

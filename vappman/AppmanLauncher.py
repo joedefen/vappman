@@ -60,25 +60,97 @@ class AppmanLauncher:
                 ['xdg-open', str(desktop_file_path)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                close_fds=True
+                close_fds=True,
+                start_new_session=True
             )
             return True
         except Exception:
             return False
 
-    def launch_in_terminal(self, executable: str) -> bool:
-        """Finds a terminal and runs the executable inside it."""
+    def launch_in_terminal(self, executable: str, show_command: bool = False) -> bool:
+        """Finds a terminal and runs the executable inside it.
+
+        Args:
+            executable: Command to execute
+            show_command: If True, echo the command before running it
+        """
         term = self._find_terminal()
         if not term:
             return False
 
         try:
+            # Build the actual command to run
+            if show_command:
+                # Most terminal templates already wrap in bash/sh -c, so just use shell operators
+                # For terminals that don't (like konsole -e), we need explicit bash invocation
+                # Check if this terminal already has shell wrapping
+                term_cmd_str = ' '.join(term)
+
+                if 'bash -c' in term_cmd_str or 'sh -c' in term_cmd_str:
+                    # Terminal already wraps in shell, just use shell operators
+                    # Escape for shell safety - use simpler approach without complex quoting
+                    safe_exec = executable.replace("'", "'\\''")
+                    # Use simple concatenation to avoid variable expansion issues
+                    command = f"echo '+ {safe_exec}'; echo; {executable}; echo; echo '════════════════════════════════════════'; echo 'Exit code: '$?; echo 'vappman test complete - close terminal when ready'; echo '════════════════════════════════════════'; read -p ''"
+                else:
+                    # Terminal doesn't wrap in shell (like konsole), so we need to
+                    safe_exec = executable.replace('"', '\\"')
+                    command = f'bash -c "echo + {safe_exec}; echo; {executable}; echo; echo ════════════════════════════════════════; echo Exit code: $?; echo vappman test complete - close terminal when ready; echo ════════════════════════════════════════; read -p \'\'"'
+            else:
+                command = executable
+
             # Construct the command by replacing the placeholder
-            cmd = [part.replace('{command}', str(executable)) for part in term]
-            subprocess.Popen(cmd)
+            cmd = [part.replace('{command}', str(command)) for part in term]
+            # Don't use start_new_session here - it breaks polkit authentication
+            # The terminal window provides sufficient isolation
+            # Preserve environment for polkit to work in Wayland/Sway
+            env = os.environ.copy()
+            subprocess.Popen(cmd, env=env)
             return True
         except Exception:
             return False
+
+    def _get_smart_test_command(self, app_name: str, executable: str) -> str:
+        """Generate a smart test command based on app type.
+
+        For CLI tools that need input (like cat, grep), provide sensible test args.
+        For others, just run them (GUI apps will launch, CLI will show help or run).
+        """
+        # Common CLI utilities that hang without input
+        cli_tools_with_args = {
+            'cat': '--help',
+            'grep': '--help',
+            'sed': '--help',
+            'awk': '--version',
+            'find': '--help',
+            'wc': '--help',
+            'sort': '--help',
+            'head': '--help',
+            'tail': '--help',
+            'cut': '--help',
+            'tr': '--help',
+            'uniq': '--help',
+        }
+
+        if app_name in cli_tools_with_args:
+            return f"{executable} {cli_tools_with_args[app_name]}"
+
+        # For everything else, just run it
+        # GUI apps will launch, CLI apps will show their help or run normally
+        return executable
+
+    def launch_test_in_terminal(self, app_name: str, executable: str) -> bool:
+        """Launch app test in terminal with smart command and visible echo.
+
+        Args:
+            app_name: Name of the app (for smart test logic)
+            executable: Full path or command to execute
+
+        Returns:
+            True if launched successfully, False otherwise
+        """
+        test_cmd = self._get_smart_test_command(app_name, executable)
+        return self.launch_in_terminal(test_cmd, show_command=True)
 
     def find_desktop_files(self, app_name: str) -> List[Path]:
         """Search system for -AM.desktop files related to the app."""

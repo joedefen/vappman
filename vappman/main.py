@@ -18,6 +18,8 @@ import shlex
 import subprocess
 import traceback
 import textwrap
+import argparse
+import time
 from types import SimpleNamespace
 import curses as cs
 from console_window import (
@@ -288,7 +290,10 @@ class HomeScreen(VappmanScreen):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'installed':
-            self.app.launcher.launch_in_terminal(context.info.appname)
+            self.app.launcher.launch_test_in_terminal(
+                context.info.appname,
+                context.info.appname
+            )
     
     def default_ACTION(self):
         """ TBD """
@@ -724,6 +729,38 @@ class Vappman(Prerequisites):
 
 def main():
     """ The program """
+    parser = argparse.ArgumentParser( prog='vappman',
+        description='Interactive TUI for appman - application manager',
+        epilog='Run without options to start the interactive TUI')
+    parser.add_argument( '--doctor', '--system-check',
+        action='store_true', dest='check_appimage',
+        help='Check system for AppImage compatibility issues')
+    parser.add_argument('--no-startup-check', action='store_true',
+        help='Skip quick AppImage compatibility check on startup')
+
+    args = parser.parse_args()
+
+    # Handle check-appimage command
+    if args.check_appimage:
+        from . import appimage_doctor
+        sys.exit(appimage_doctor.main())
+
+    # Quick startup check for critical AppImage issues (unless disabled)
+    if not args.no_startup_check:
+        from . import appimage_doctor
+        has_critical, status_lines = appimage_doctor.quick_check()
+
+        # Always show the check results
+        print("AppImage compatibility check:")
+        for line in status_lines:
+            print(line)
+
+        if has_critical:
+            print("\n⚠ Critical issues found! Run 'vappman --check-appimage' for detailed fixes")
+            print("Starting TUI in 3 seconds...")
+            time.sleep(3)
+        print()
+
     try:
         appman = Vappman()
         appman.main_loop()
