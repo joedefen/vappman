@@ -738,12 +738,39 @@ def main():
         help='Check system for AppImage compatibility issues')
     parser.add_argument('--no-startup-check', action='store_true',
         help='Skip quick AppImage compatibility check on startup')
+    parser.add_argument('--prereq', '--prerequisites',
+        action='store_true', dest='prereq_only',
+        help='Check and install prerequisites only, then exit')
 
     args = parser.parse_args()
 
-    # Handle check-appimage command
-    if args.check_appimage:
-        sys.exit(AppimageDoctor.main())
+    # Handle standalone mode (--prereq and/or --doctor)
+    standalone_mode = args.check_appimage or args.prereq_only
+
+    if standalone_mode:
+        exit_code = 0
+
+        # Run prerequisite check if requested
+        if args.prereq_only:
+            prereq = Prerequisites()
+            prereq.check_preqreqs()
+            print()  # Blank line separator
+
+        # Run AppImage doctor check if requested
+        if args.check_appimage:
+            result = AppimageDoctor.main()
+            if result != 0:
+                exit_code = result
+
+        # Final summary message
+        if args.prereq_only and args.check_appimage:
+            print('\n' + '='*60)
+            print('System check complete.')
+            print('='*60)
+        elif args.prereq_only:
+            print('\nPrerequisite check complete.')
+
+        sys.exit(exit_code)
 
     # Quick startup check for critical AppImage issues (unless disabled)
     if not args.no_startup_check:

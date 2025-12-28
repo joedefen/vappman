@@ -9,7 +9,7 @@
 
 #### Installation
 * Install `vappman` using `pipx install vappman` (recommended)
-* Alternative: `pip install vappman` or install from source
+* Run (first time): vappman --prereq --doctor
 
 #### Key Features (Added in V2)
 

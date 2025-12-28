@@ -46,12 +46,13 @@ class Prerequisites:
 
         return (None, None)
 
-    def install_dependencies(self, missing):
+    def install_dependencies(self, missing, skip_prompt=False):
         """
         Offer to install missing dependencies using the system package manager.
 
         Args:
-            missing (set): Set of missing program names
+            missing (set): Set of missing program names or package names
+            skip_prompt (bool): If True, skip confirmation prompt and install directly
 
         Returns:
             bool: True if installation succeeded or user declined, False on error
@@ -67,26 +68,20 @@ class Prerequisites:
             print('Please install them manually using your system package manager.')
             return False
 
-        # Map common program names to package names for different distros
-        # Some programs have different package names on different distros
-        package_map = {
-            'curl': 'curl',
-            'grep': 'grep',
-            'jq': 'jq',
-            'sed': 'sed',
-            'wget': 'wget',
-        }
+        packages = sorted(missing)
 
-        packages = [package_map.get(prog, prog) for prog in missing]
+        if not skip_prompt:
+            print(f'\n⚠️  Missing dependencies: {", ".join(packages)}')
+            print(f'\nDetected package manager: {pm_name}')
 
-        print(f'\n⚠️  Missing dependencies: {", ".join(sorted(missing))}')
-        print(f'\nDetected package manager: {pm_name}')
+            response = input(f'\nInstall missing dependencies? [y/N]: ').strip().lower()
 
-        response = input(f'\nInstall missing dependencies? [y/N]: ').strip().lower()
-
-        if response not in ('y', 'yes'):
-            print('Installation cancelled.')
-            return False
+            if response not in ('y', 'yes'):
+                print('Installation cancelled.')
+                return False
+        else:
+            print(f'\nInstalling: {", ".join(packages)}')
+            print(f'Using package manager: {pm_name}')
 
         # Build and execute the install command
         install_cmd = install_cmd_template.format(packages=' '.join(packages))
@@ -96,6 +91,10 @@ class Prerequisites:
             result = subprocess.run(install_cmd, shell=True, check=False)
             if result.returncode != 0:
                 print(f'\n❌ Installation failed with exit code {result.returncode}')
+                if pm_name == 'apt':
+                    print('\nTip: If you see repository errors, try:')
+                    print('  - Check for problematic PPAs in /etc/apt/sources.list.d/')
+                    print('  - Remove outdated PPAs that block apt operations')
                 return False
             print(f'\n✅ Dependencies installed successfully!')
             return True
@@ -157,29 +156,86 @@ class Prerequisites:
         """
         print('Checking prerequisites...')
 
-        missing = set()
+        # Core dependencies (required) - from AM documentation
+        core_deps = {
+            'curl': 'curl',      # to check URLs
+            'grep': 'grep',      # to check files
+            'sed': 'sed',        # to edit/adapt installed files
+            'wget': 'wget',      # to download programs and update AM
+            'cat': 'coreutils',  # part of coreutils
+            'chmod': 'coreutils',  # part of coreutils
+            'chown': 'coreutils',  # part of coreutils
+        }
+
+        # Optional dependencies - from AM documentation
+        optional_deps = {
+            'ar': 'binutils',    # extracts .deb packages
+            'less': 'less',      # to read long lists
+            'unzip': 'unzip',    # to extract .zip packages
+            'tar': 'tar',        # to extract .tar* packages
+            'zsync': 'zsync',    # required by very few programs
+        }
+
+        missing_core = set()
+        missing_optional = set()
         self.has_am = bool(shutil.which('am') is not None)
         self.has_appman = bool(shutil.which('appman') is not None)
 
-        for prog in 'curl grep jq sed wget'.split():
-            if shutil.which(prog) is None:
-                missing.add(prog)
+        # Check for sudo or doas
+        has_sudo = shutil.which('sudo') is not None
+        has_doas = shutil.which('doas') is not None
+        if not has_sudo and not has_doas:
+            print('\n⚠️  WARNING: Neither "sudo" nor "doas" found.')
+            print('    System-level operations may not work correctly.')
 
-        # Handle missing dependencies
-        if missing:
-            if not self.install_dependencies(missing):
-                print('\n❌ Cannot proceed without required dependencies.')
+        # Check core dependencies
+        for prog in core_deps:
+            if shutil.which(prog) is None:
+                missing_core.add(prog)
+
+        # Check optional dependencies
+        for prog in optional_deps:
+            if shutil.which(prog) is None:
+                missing_optional.add(prog)
+
+        # Handle missing core dependencies
+        if missing_core:
+            # Map programs to their package names
+            packages_needed = set()
+            for prog in missing_core:
+                packages_needed.add(core_deps[prog])
+
+            if not self.install_dependencies(packages_needed):
+                print('\n❌ Cannot proceed without required core dependencies.')
                 sys.exit(1)
 
             # Verify installation
             still_missing = set()
-            for prog in missing:
+            for prog in missing_core:
                 if shutil.which(prog) is None:
                     still_missing.add(prog)
 
             if still_missing:
                 print(f'\n❌ Still missing after installation: {", ".join(sorted(still_missing))}')
                 sys.exit(1)
+
+        # Handle missing optional dependencies (pause but don't block)
+        optional_install_failed = False
+        if missing_optional:
+            packages_needed = set()
+            for prog in missing_optional:
+                packages_needed.add(optional_deps[prog])
+
+            print(f'\n⚠️  Optional dependencies missing: {", ".join(sorted(missing_optional))}')
+            print('    Some features may not work without these packages.')
+
+            response = input(f'\nInstall optional dependencies? [y/N]: ').strip().lower()
+            if response in ('y', 'yes'):
+                if not self.install_dependencies(packages_needed, skip_prompt=True):
+                    optional_install_failed = True
+            else:
+                print('Continuing without optional dependencies...')
+                input('Press Enter to continue...')
 
         # Handle missing AM/appman
         if not self.has_am and not self.has_appman:
@@ -197,4 +253,7 @@ class Prerequisites:
             print('\nPlease restart vappman to begin using it.')
             sys.exit(0)
 
-        print('✅ All prerequisites satisfied.')
+        if optional_install_failed:
+            print('⚠️  Core prerequisites satisfied (optional dependencies had issues).')
+        else:
+            print('✅ All prerequisites satisfied.')
