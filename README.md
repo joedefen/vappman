@@ -3,13 +3,16 @@
 
 **Why use `vappman`?** Browse 2000+ apps interactively with mouse/keyboard, filter by keywords or regex to rapidly find apps, and see installed vs. available at a glance. CLI option memorization is not required because context-sensitive keys guide you through the life cycle of your AppImages including installing, updating, and removing.
 
+![vappman demo](https://raw.githubusercontent.com/joedefen/vappman/main/images/vappman-2025-12-28.12-48.gif)
+
 #### Prerequisites
 * Install [ivan-hc/AppMan: AppImage package manager to install, update (for real) and manage ALL of them](https://github.com/ivan-hc/AppMan) and all of its prerequisites.
 * **Note**: to make it easier,`vappman` offers to install `am` or `appman` and their required dependencies if missing on startup.
 
 #### Installation
 * Install `vappman` using `pipx install vappman` (recommended)
-* Run (first time): vappman --prereq --doctor
+* Run first time: `vappman --prereq --doctor` (check if system is ready)
+* Run normally: `vappman`
 
 #### Key Features (Added in V2)
 

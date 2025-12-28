@@ -476,6 +476,7 @@ class Vappman(Prerequisites):
             nonlocal current_in_user_mode
             installs, installs_by_appname = {}, {}
             local = False
+            has_db_column = False
 
             # Process line by line
             # lines = input_text.strip().split('\n')
@@ -486,6 +487,12 @@ class Vappman(Prerequisites):
                 if 'HAVE INSTALLED' in line:
                     local = bool('LOCAL' in line)
 
+                # Check column headers to see if DB column is present
+                # Header line looks like: " - APPNAME | DB | VERSION | TYPE | SIZE"
+                # or without DB: " - APPNAME | VERSION | TYPE | SIZE"
+                if line.startswith('- APPNAME'):
+                    has_db_column = bool('| DB' in line or '|DB' in line)
+
                 # Identify data lines (they start with the diamond symbol ◆)
                 if line.startswith('◆'):
                     # Remove the symbol and split by pipe '|'
@@ -494,13 +501,19 @@ class Vappman(Prerequisites):
 
                     if len(parts) in (4, 5):
                         name = parts[0]
-                        db_adj = 1 if len(parts) == 5 else 0
                         if name in ('am', 'appman', ):
                             continue
-                        db = parts[1] if db_adj else 'am'
-                        version = parts[1+db_adj]
-                        app_type = parts[2+db_adj]
-                        # size = parts[3+db_adj]
+
+                        # Use header info to determine column layout
+                        if has_db_column and len(parts) == 5:
+                            db = parts[1]
+                            version = parts[2]
+                            app_type = parts[3]
+                        else:
+                            db = 'am'
+                            version = parts[1]
+                            app_type = parts[2]
+                        # size = parts[3 or 4]
 
                         where = 'S' if not local else ''
                         where += 'U' if local else ''
