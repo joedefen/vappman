@@ -14,14 +14,13 @@ Interactive, visual thin layer atop appman/am
 import os
 import sys
 import re
-import shutil
 import shlex
 import subprocess
 import traceback
 import textwrap
 from types import SimpleNamespace
 import curses as cs
-from .ConsoleWindow import (
+from console_window import (
     ConsoleWindow, OptionSpinner, ConsoleWindowOpts,
     Screen, ScreenStack, BasicHelpScreen, Context,
     IncrementalSearchBar
