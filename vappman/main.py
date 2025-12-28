@@ -237,7 +237,7 @@ class HomeScreen(VappmanScreen):
                 if conflicts:
                     header2 += f' install-conflicts={conflicts}'
                 else:
-                    header2 += f' [i]nstall O:opts={app.opts.install_opts}'
+                    header2 += f' [i]nstall [a]bout O:opts={app.opts.install_opts}'
         
         win.add_fancy_header(header2, app.opts.fancy_header)
                 
@@ -684,6 +684,8 @@ class Vappman(Prerequisites):
             for opt in self.opts.install_opts.strip().split(','):
                 if opt:
                     cmd.append(f'--{opt}')
+
+        if subcommand in ('install', 'about'):
             if info and info.db != 'am':
                 appname += f'.{info.db}'
         if appname:
