@@ -34,6 +34,7 @@
   * Default install options (--icons, --sandbox)
   * Preferred database selection
   * Maximum backups per application
+* **Generally faster** Although the number of offered apps has more than doubled with 3rd party database, the startup is faster (after the first time). The previous app list is used initially and then updated in the background.
 * **AppImage Compatibility Checking**: Automatic system checks for common AppImage issues (libfuse2, user namespaces, etc.) with distro-specific fix suggestions
 
 #### Supported `am/appman` Operations

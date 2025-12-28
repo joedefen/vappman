@@ -10,6 +10,7 @@ Interactive, visual thin layer atop appman/am
 # pylint: disable=consider-using-in,too-many-nested-blocks
 # pylint: disable=wrong-import-position,disable=wrong-import-order
 # pylint: disable=line-too-long,protected-access,invalid-name
+# pylint: disable=too-many-locals
 
 import os
 import sys
@@ -32,6 +33,7 @@ from .AppmanVars import AppmanVars, AppLocation
 from .AppmanLauncher import AppmanLauncher
 from .Prerequisites import Prerequisites
 from .VappmanListCache import AppCacheManager
+from . import AppimageDoctor
 
 # Screen constants
 HOME_ST, HELP_ST = 0, 1
@@ -62,7 +64,7 @@ class HomeScreen(VappmanScreen):
         return whether sandboxed """
         return bool(info and info.app_type and '🔒' in info.app_type)
 
-    def add_folded_synopsis_lines(self, fold_offset, wrapped_lines, max=1):
+    def add_folded_synopsis_lines(self, fold_offset, wrapped_lines, num=1):
         """
         Add wrapped synopsis continuation lines as TRANSIENT context lines.
 
@@ -76,7 +78,7 @@ class HomeScreen(VappmanScreen):
 
         :param fold_offset: Horizontal position where continuation text should start
         :param wrapped_lines: Pre-wrapped lines from textwrap.wrap() with indent params
-        :param max: Maximum number of continuation lines to display (default: 1)
+        :param num: Maximum number of continuation lines to display (default: 1)
         """
         def make_indent(amount, corner):
             rv = ' '*4
@@ -90,14 +92,14 @@ class HomeScreen(VappmanScreen):
         # Skip first line (already shown on main line), add up to 'max' continuation lines
         # Continuation lines are already sized correctly from textwrap's subsequent_indent
         indent = make_indent(2+fold_offset, False)
-        lines = wrapped_lines[1:1+max]
+        lines = wrapped_lines[1:1+num]
         for line in lines[:-1]:
             # Indent to fold_offset position
             win.add_body(indent + line, context=Context("TRANSIENT"))
         indent = make_indent(2+fold_offset, True)
         if len(lines) > 0:
             win.add_body(indent + wrapped_lines[-1], context=Context("TRANSIENT"))
-            
+
 
     def get_folded_synopsis(self, offset1, offset2, text):
         """ TBD """
@@ -109,12 +111,11 @@ class HomeScreen(VappmanScreen):
                 text,
                 width=width,
                 initial_indent=' '*initial_indent
-            ) 
+            )
             if wraps:
                 wraps[0] = wraps[0][initial_indent:]
             return wraps
-        else:
-            return [text]
+        return [text]
 
 
     def draw_screen(self):
@@ -170,15 +171,15 @@ class HomeScreen(VappmanScreen):
                     wraps = self.get_folded_synopsis(first_synopsis_offset, fold_offset, ns.synopsis)
                     line += wraps[0]
                 else:
-                    line += ns.synopsis 
+                    line += ns.synopsis
 
                 status = "installed" if app.opts.in_system_mode or 'U' in where else "uninstalled"
                 win.add_body(line, context=Context(status, info=ns))
 
-                if (idx == win.pick_pos):
+                if idx == win.pick_pos:
                     #wraps.append(f'🅥 {ns.version} {ns.app_type}')
                     wraps.append(f'🠞 {ns.version} {ns.app_type}')
-                    self.add_folded_synopsis_lines(fold_offset, wraps, max=2)
+                    self.add_folded_synopsis_lines(fold_offset, wraps, num=2)
                     # line = f'{"":<13}  ╰── {ns.version} {ns.app_type}'
                     # win.add_body(line, context=Context("TRANSIENT"))
                 idx += 1
@@ -198,15 +199,15 @@ class HomeScreen(VappmanScreen):
                 first_synopsis_offset = len(line)
 
                 # Calculate offsets for uninstalled apps
-                if (idx == win.pick_pos):
+                if idx == win.pick_pos:
                     wraps = self.get_folded_synopsis(first_synopsis_offset, fold_offset, ns.synopsis)
                     line += wraps[0]
                 else:
-                    line += ns.synopsis 
+                    line += ns.synopsis
 
                 win.add_body(line, context=Context("uninstalled", info=ns))
 
-                if (idx == win.pick_pos):
+                if idx == win.pick_pos:
                     self.add_folded_synopsis_lines(fold_offset, wraps)
 
                 idx += 1
@@ -240,9 +241,9 @@ class HomeScreen(VappmanScreen):
                     header2 += f' install-conflicts={conflicts}'
                 else:
                     header2 += f' [i]nstall [a]bout O:opts={app.opts.install_opts}'
-        
+
         win.add_fancy_header(header2, app.opts.fancy_header)
-                
+
     def appman_on_installed(self, verb):
         """ TBD """
         context = self.win.get_picked_context()
@@ -268,7 +269,7 @@ class HomeScreen(VappmanScreen):
     def sandbox_ACTION(self):
         """ TBD """
         context = self.win.get_picked_context()
-        
+
         if context.genre == "installed":
             if self.is_sandboxed(context.info):
                 verb = '--disable-sandbox'
@@ -294,12 +295,12 @@ class HomeScreen(VappmanScreen):
                 context.info.appname,
                 context.info.appname
             )
-    
+
     def default_ACTION(self):
         """ TBD """
         context = self.win.get_picked_context()
         if context and context.genre == 'installed':
-           return self.remove_ACTION()
+            return self.remove_ACTION()
         if context and context.genre == 'uninstalled':
             return self.install_ACTION()
 
@@ -372,7 +373,7 @@ class Vappman(Prerequisites):
         super().__init__()
         assert not Vappman.singleton
         Vappman.singleton = self
-        
+
         self.check_preqreqs()
         print(f'{self.has_am=}')
         print(f'{self.has_appman=}')
@@ -467,7 +468,7 @@ class Vappman(Prerequisites):
         self.win.set_handled_keys(self.spin)
 
 
-    def cmd_dict(self, cmd, start=r'\s*◆\s', repull=True):
+    def cmd_dict(self, cmd, repull=True):
         """ Get lines with the given start put into a dict keyed by the
             1st word.
         """
@@ -475,22 +476,22 @@ class Vappman(Prerequisites):
             nonlocal current_in_user_mode
             installs, installs_by_appname = {}, {}
             local = False
-            
+
             # Process line by line
             # lines = input_text.strip().split('\n')
-            
+
             for line in lines:
                 line = line.strip()
                 # Determine to reset location (Global vs Local)
                 if 'HAVE INSTALLED' in line:
                     local = bool('LOCAL' in line)
-                    
+
                 # Identify data lines (they start with the diamond symbol ◆)
                 if line.startswith('◆'):
                     # Remove the symbol and split by pipe '|'
                     # We strip whitespace and also remove the '*' indicator for libfuse2
                     parts = [p.strip().rstrip('*') for p in line[1:].split('|')]
-                    
+
                     if len(parts) in (4, 5):
                         name = parts[0]
                         db_adj = 1 if len(parts) == 5 else 0
@@ -503,7 +504,7 @@ class Vappman(Prerequisites):
 
                         where = 'S' if not local else ''
                         where += 'U' if local else ''
-                        
+
                         # Store as a SimpleNamespace for dot-notation access
                         ns = installs.get((name, db), None)
                         if ns:  # we have both user and system apps
@@ -742,13 +743,11 @@ def main():
 
     # Handle check-appimage command
     if args.check_appimage:
-        from . import appimage_doctor
-        sys.exit(appimage_doctor.main())
+        sys.exit(AppimageDoctor.main())
 
     # Quick startup check for critical AppImage issues (unless disabled)
     if not args.no_startup_check:
-        from . import appimage_doctor
-        has_critical, status_lines = appimage_doctor.quick_check()
+        has_critical, status_lines = AppimageDoctor.quick_check()
 
         # Always show the check results
         print("AppImage compatibility check:")

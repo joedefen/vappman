@@ -196,7 +196,7 @@ class AppCacheManager:
 
     def get_apps(self):
         if not os.path.exists(self.list_file):
-            print("[Cache] No file found. Fetching initial list...")
+            # print("[Cache] No file found. Fetching initial list...")
             self.refresh_background()
             while self.runner.is_running(): time.sleep(0.1)
             self._parse_now()
@@ -204,13 +204,13 @@ class AppCacheManager:
             self._parse_now()
             age = time.time() - os.path.getmtime(self.list_file)
             if age > self.cache_duration:
-                print(f"[Cache] File is {int(age)}s old. Refreshing in background...")
+                # print(f"[Cache] File is {int(age)}s old. Refreshing in background...")
                 self.refresh_background()
         return self.apps
 
     def check_for_updates(self):
         if self.runner and not self.runner.is_running():
-            print("[Cache] Background update finished. Reloading dict.")
+            # print("[Cache] Background update finished. Reloading dict.")
             self._parse_now()
             self.runner = None
             return True
