@@ -19,7 +19,7 @@
 * **Dual Mode Support**: Works with both `am` (system-wide) and `appman` (user-local). The (`m`) m-key toggles user (local install) and system (non-local install) modes when using `am`.
 * **Multi-Database Support**: Access all of `am`'s app databases including:
   * `am` - Main AppImage database with 2000+ portable Linux applications
-  * `busybox` - Minimal Unix utilities as AppImages
+  * `busybox` - Minimal Unix utilities as binaries
   * `appbundle` - AppBundle format packages (portable application bundles)
   * `python` - Python interpreters (multiple versions available as AppImages)
   * `soarpkg` - [Soar User Repository](https://github.com/pkgforge/soarpkgs) packages (portable, distro-independent binaries)
