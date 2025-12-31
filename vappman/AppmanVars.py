@@ -28,7 +28,7 @@ class AppmanVars:
         """Returns True if appman-mode file exists."""
         return not self.is_user_mode()
 
-    def set_system_mode(self, enable: bool):
+    def set_system_mode_cheat(self, enable: bool):
         """Sets the mode by creating or removing the appman-mode file."""
         try:
             if enable:

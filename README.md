@@ -16,7 +16,7 @@
 
 #### Key Features (Added in V2)
 
-* **Dual Mode Support**: Works with both `am` (system-wide) and `appman` (user-local). One key (`m`) switches instantly between user (local install) and system (non-local install) modes when using `am`.
+* **Dual Mode Support**: Works with both `am` (system-wide) and `appman` (user-local). The (`m`) m-key toggles user (local install) and system (non-local install) modes when using `am`.
 * **Multi-Database Support**: Access all of `am`'s app databases including:
   * `am` - Main AppImage database with 2000+ portable Linux applications
   * `busybox` - Minimal Unix utilities as AppImages

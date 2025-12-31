@@ -140,9 +140,10 @@ class HomeScreen(VappmanScreen):
 
         title = "APPMAN"
         if not app.has_appman:
-            title = 'm:AM-SYSTEM' if app.opts.in_system_mode else 'm:AM-USER'
-            if app.appman.is_system_mode() != app.opts.in_system_mode:
-                app.appman.set_system_mode(app.opts.in_system_mode)
+            was_in_system_mode = app.in_system_mode 
+            app.in_system_mode = app.appman.is_system_mode()
+            title = 'm:AM-SYSTEM' if app.in_system_mode else 'm:AM-USER'
+            if was_in_system_mode != app.in_system_mode:
                 app.installs, app.installs_by_appname = app.get_installed(repull=False)
         # Save persistent state if any options changed
         app.disk_state.save_if_changed(app.opts)
@@ -173,7 +174,7 @@ class HomeScreen(VappmanScreen):
                 else:
                     line += ns.synopsis
 
-                status = "installed" if app.opts.in_system_mode or 'U' in where else "uninstalled"
+                status = "installed" if app.in_system_mode or 'U' in where else "uninstalled"
                 win.add_body(line, context=Context(status, info=ns))
 
                 if idx == win.pick_pos:
@@ -349,6 +350,13 @@ class HomeScreen(VappmanScreen):
         app.win.passthrough_mode = True
         return None
 
+    def toggle_system_mode_ACTION(self):
+        """ Switch between user and system mode """
+        app = self.app
+        if app.in_system_mode:
+            return app.run_appman('--user')
+        return app.run_appman('--system')
+
 
 class VappmanHelpScreen(BasicHelpScreen):
     """Help screen with vappman-specific additions"""
@@ -402,6 +410,7 @@ class Vappman(Prerequisites):
         self.apps_by_name_db = self.cache_mgr.apps_by_key
         self.saved_outputs = {}
         self.installs, self.installs_by_appname = self.get_installed() # dict keyed by app
+        self.in_system_mode = self.appman.is_system_mode()
 
         win_opts = ConsoleWindowOpts()
         win_opts.head_line=True
@@ -432,8 +441,7 @@ class Vappman(Prerequisites):
         spin.add_key('fancy_header', '_ - fancy header mode', vals=['Underline', 'Reverse', 'Off'])
         spin.add_key('demo_mode', '* - demo_mode', vals=[False, True])
         if not self.has_appman:
-            spin.add_key('in_system_mode', 'm - AM system mode', vals=[False, True])
-            self.opts.in_system_mode = self.appman.is_system_mode()
+            spin.add_key('toggle_system_mode', 'm - toggle system mode', genre='action')
         spin.add_key('max_backups', '# - max backups per app', vals=[-1, 2, 1])
         self.opts.max_backups = self.disk_state.max_backups
         self.opts.install_opts = self.disk_state.install_opts
@@ -546,7 +554,7 @@ class Vappman(Prerequisites):
             if 'files' in cmd.split():
                 if current_in_user_mode is True:
                     # temp: promote to system mode to get all apps
-                    self.appman.set_system_mode(True)
+                    self.appman.set_system_mode_cheat(True)
 
             # Run the command and capture the output
             try:
@@ -556,11 +564,11 @@ class Vappman(Prerequisites):
             except Exception as exc:
                 ConsoleWindow.stop_curses()
                 if current_in_user_mode is True:
-                    self.appman.set_system_mode(False)
+                    self.appman.set_system_mode_cheat(False)
                 print(f'FAILED: {command}: {exc}')
                 sys.exit(1)
             if current_in_user_mode is True:
-                self.appman.set_system_mode(False)
+                self.appman.set_system_mode_cheat(False)
 
             if result.returncode != 0:
                 print(f'WARNING: {command}: {result.returncode=}')
