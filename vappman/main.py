@@ -481,9 +481,9 @@ class Vappman(Prerequisites):
             1st word.
         """
         def parse_app_list(lines):
-            nonlocal current_in_user_mode
+            nonlocal switch_to_system_mode
             installs, installs_by_appname = {}, {}
-            local = False
+            local = True if self.has_appman else False
             has_db_column = False
 
             # Process line by line
@@ -492,7 +492,7 @@ class Vappman(Prerequisites):
             for line in lines:
                 line = line.strip()
                 # Determine to reset location (Global vs Local)
-                if 'HAVE INSTALLED' in line:
+                if not self.has_appman and 'HAVE INSTALLED' in line:
                     local = bool('LOCAL' in line)
 
                 # Check column headers to see if DB column is present
@@ -529,7 +529,7 @@ class Vappman(Prerequisites):
                         # Store as a SimpleNamespace for dot-notation access
                         ns = installs.get((name, db), None)
                         if ns:  # we have both user and system apps
-                            if current_in_user_mode and local:
+                            if switch_to_system_mode and local:
                                 ns.version=version
                             ns.where += where
                         else:
@@ -547,12 +547,12 @@ class Vappman(Prerequisites):
         command = ['appman' if self.has_appman else 'am']
         command += cmd.split()
         output_key = ' '.join(command)
-        current_in_user_mode = self.appman.is_user_mode()
+        switch_to_system_mode = not self.has_appman and self.appman.is_user_mode()
 
         output = self.saved_outputs.get(output_key, None)
         if repull or not output:
             if 'files' in cmd.split():
-                if current_in_user_mode is True:
+                if switch_to_system_mode is True:
                     # temp: promote to system mode to get all apps
                     self.appman.set_system_mode_cheat(True)
 
@@ -563,11 +563,11 @@ class Vappman(Prerequisites):
                         stderr=subprocess.PIPE, check=False)
             except Exception as exc:
                 ConsoleWindow.stop_curses()
-                if current_in_user_mode is True:
+                if switch_to_system_mode is True:
                     self.appman.set_system_mode_cheat(False)
                 print(f'FAILED: {command}: {exc}')
                 sys.exit(1)
-            if current_in_user_mode is True:
+            if switch_to_system_mode is True:
                 self.appman.set_system_mode_cheat(False)
 
             if result.returncode != 0:

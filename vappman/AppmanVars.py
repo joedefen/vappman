@@ -10,7 +10,7 @@ class AppLocation(NamedTuple):
     usr_path: Path  # Path to user storage dir or None
 
 class AppmanVars:
-    """ Encapuslates the places / functions we need to know
+    """ Encapsulates the places / functions we need to know
     about to observe, manage am/appman. """
     def __init__(self):
         self.system_app_dir = Path("/opt")
