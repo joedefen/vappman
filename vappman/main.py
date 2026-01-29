@@ -386,7 +386,7 @@ class Vappman(Prerequisites):
         print(f'{self.has_am=}')
         print(f'{self.has_appman=}')
         self.disk_state = PersistentState('vappman',
-                      max_backups=1, install_opts='', database='vm')
+                      max_backups=1, install_opts='', database='am')
         self.appman = AppmanVars()
         self.launcher = AppmanLauncher(self.appman)
 
