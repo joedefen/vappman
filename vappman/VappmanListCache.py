@@ -198,7 +198,9 @@ class AppCacheManager:
         if not os.path.exists(self.list_file):
             # print("[Cache] No file found. Fetching initial list...")
             self.refresh_background()
+            print('Fetching initial app list [IF STUCK, press ENTER several times]...')
             while self.runner.is_running(): time.sleep(0.1)
+            print('... got initial app list ... continuing up ...')
             self._parse_now()
         else:
             self._parse_now()

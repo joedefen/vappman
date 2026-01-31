@@ -250,7 +250,8 @@ class Prerequisites:
 
             # After successful installation, exit so user can restart vappman
             print('\n✅ Installation complete!')
-            print('\nPlease restart vappman to begin using it.')
+            print('\n⚠️  Run "appman -h" or "am -h" and answer setup questions.')
+            print('\n⚠️  ONLY after init, restart vappman to begin using it.')
             sys.exit(0)
 
         if optional_install_failed:
