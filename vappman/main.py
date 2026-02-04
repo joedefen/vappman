@@ -650,6 +650,12 @@ class Vappman(Prerequisites):
                     # Key was handled by search bar, skip normal processing
                     pass
                 else:
+                    # If search bar is active but didn't handle the key (e.g., up/down arrows),
+                    # close the search first (accept current text) before normal processing
+                    if self.search_bar._active:
+                        self.search_bar._active = False
+                        self._on_search_accept(self.search_bar._text)
+
                     # Normal mode - let OptionSpinner process the key
                     self.spin.do_key(key, win)
 
