@@ -4,10 +4,11 @@ Unit tests for the OptionSpinner scoped key bindings feature (no curses required
 Tests the scope logic without requiring a full ConsoleWindow.
 """
 import sys
-sys.path.insert(0, '/home/joe/Projects/vappman')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from types import SimpleNamespace
-from vappman.ConsoleWindow import OptionSpinner
+from console_window import OptionSpinner
 
 # Define screen constants
 HOME_ST, SETTINGS_ST, HELP_ST = 0, 1, 2
@@ -63,10 +64,10 @@ def test_action_scoping():
 
     # Create a mock stack with screen objects that have specific methods
     home_screen = SimpleNamespace()
-    home_screen.save = lambda: "saved"
+    home_screen.save_ACTION = lambda: "saved"
 
     settings_screen = SimpleNamespace()
-    settings_screen.export = lambda: "exported"
+    settings_screen.export_ACTION = lambda: "exported"
 
     stack = SimpleNamespace(
         screens=SCREENS,
@@ -96,7 +97,7 @@ def test_action_scoping():
 
 
 def test_duplicate_key_error():
-    """Test that defining the same key twice for the same screen raises an error."""
+    """Test duplicate-attr rejection and same-key scope stealing."""
     print("\n=== Test 3: Duplicate Key Detection ===")
 
     stack = SimpleNamespace(
@@ -115,16 +116,25 @@ def test_duplicate_key_error():
     spinner.add_key('action1', 'a - Action 1', keys=ord('a'), genre='action', scope=HOME_ST)
     print("✓ Added 'a' key for HOME screen")
 
-    # Try to add the same key for HOME again - should fail
+    # Reusing the same attribute name is a programmer error and must fail
     try:
-        spinner.add_key('action2', 'a - Action 2', keys=ord('a'), genre='action', scope=HOME_ST)
-        print("✗ ERROR: Should have raised ValueError for duplicate key!")
-        return False
+        spinner.add_key('action1', 'a - Action 1 (dup)', keys=ord('b'),
+                        genre='action', scope=HOME_ST)
+        raise AssertionError("Should have raised ValueError for duplicate attr name")
     except ValueError as e:
-        print(f"✓ Correctly raised error: {e}")
+        print(f"✓ Correctly rejected duplicate attr name: {e}")
 
-    # But adding 'a' for a different screen should work
+    # Reusing the same key with a new attr on the same scope is allowed but
+    # *steals* the binding: the earlier option's scope becomes empty.
+    spinner.add_key('action2', 'a - Action 2', keys=ord('a'), genre='action', scope=HOME_ST)
+    assert spinner.attr_to_option['action1'].effective_scope == set(), \
+        "Earlier option should have lost its scope to the newer binding"
+    assert spinner.attr_to_option['action2'].effective_scope == {HOME_ST}
+    print("✓ Same key rebound for HOME (earlier scope emptied)")
+
+    # Adding 'a' for a different screen is independent
     spinner.add_key('action3', 'a - Action 3', keys=ord('a'), genre='action', scope=SETTINGS_ST)
+    assert spinner.attr_to_option['action3'].effective_scope == {SETTINGS_ST}
     print("✓ Added same key 'a' for SETTINGS screen (different scope)")
 
 

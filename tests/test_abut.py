@@ -4,9 +4,10 @@ Test script for the ConsoleWindow abut feature.
 Demonstrates different abut configurations in pick_mode.
 """
 import sys
-sys.path.insert(0, '/home/joe/Projects/vappman')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from vappman.ConsoleWindow import ConsoleWindow, ConsoleWindowOpts, Context
+from console_window import ConsoleWindow, ConsoleWindowOpts, Context
 
 
 def test_abut_feature():

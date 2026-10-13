@@ -1,47 +1,14 @@
 import os
 import re
 import shutil
-import subprocess
 import time
 from types import SimpleNamespace
 
 # --- 1. The Background Execution Engine ---
+# CommandRunner lives in its own module (vappman/CommandRunner.py) so the
+# implementation is not duplicated between here and the standalone module.
 
-class CommandRunner:
-    def __init__(self, arg_vector, final_destination):
-        self.arg_vector = arg_vector
-        self.final_destination = final_destination
-        self.temp_file = final_destination + ".tmp"
-        self.process = None
-        self._file_handle = None
-
-    def start(self):
-        self._file_handle = open(self.temp_file, 'w', encoding='utf-8')
-        self.process = subprocess.Popen(
-            self.arg_vector,
-            stdout=self._file_handle,
-            stderr=subprocess.STDOUT,
-            text=True
-        )
-
-    def is_running(self):
-        if self.process is None:
-            return False
-        status = self.process.poll()
-        if status is not None:
-            self._finalize_file()
-            return False
-        return True
-
-    def _finalize_file(self):
-        if self._file_handle:
-            self._file_handle.close()
-            self._file_handle = None
-        if os.path.exists(self.temp_file):
-            os.replace(self.temp_file, self.final_destination)
-
-    def get_return_code(self):
-        return self.process.poll() if self.process else None
+from .CommandRunner import CommandRunner
 
 
 # --- 2. The Text Parser ---

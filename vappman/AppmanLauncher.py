@@ -180,11 +180,12 @@ class AppmanLauncher:
 
         # 2. Fallback: Try to find binary in the appman install dir
         loc = self.vars.where_is(app_name)
-        if loc:
+        for base_dir in (loc.usr_path, loc.sys_path):
+            if base_dir is None:
+                continue
             # Look for executables in the app folder
             # Usually appman puts binaries in a 'bin' subfolder or the root
-            possible_bins = list(loc.path.glob(f"**/{app_name}"))
-            for bin_path in possible_bins:
+            for bin_path in base_dir.glob(f"**/{app_name}"):
                 if os.access(bin_path, os.X_OK):
                     if self.launch_in_terminal(str(bin_path)):
                         return

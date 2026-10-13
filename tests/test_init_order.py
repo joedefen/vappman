@@ -4,7 +4,8 @@ Test that the initialization order works without circular dependency.
 No curses required - just tests the object creation order.
 """
 import sys
-sys.path.insert(0, '/home/joe/Projects/vappman')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from types import SimpleNamespace
 
@@ -30,7 +31,7 @@ def test_init_order():
             print(f"  ✓ set_handled_keys() called: {len(self.handled_keys)} keys")
 
     # Import real classes
-    from vappman.ConsoleWindow import OptionSpinner
+    from console_window import OptionSpinner
 
     SCREENS = ('HOME', 'SETTINGS', 'HELP')
     HOME_ST, SETTINGS_ST, HELP_ST = 0, 1, 2

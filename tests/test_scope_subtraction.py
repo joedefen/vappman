@@ -3,10 +3,11 @@
 Test that demonstrates scope subtraction working correctly.
 """
 import sys
-sys.path.insert(0, '/home/joe/Projects/vappman')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from types import SimpleNamespace
-from vappman.ConsoleWindow import OptionSpinner
+from console_window import OptionSpinner
 
 # Define screen constants
 HOME_ST, SETTINGS_ST, HELP_ST = 0, 1, 2

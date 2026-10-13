@@ -4,9 +4,10 @@ Test script for the OptionSpinner scoped key bindings feature.
 Demonstrates screen-specific key actions with scope subtraction.
 """
 import sys
-sys.path.insert(0, '/home/joe/Projects/vappman')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from vappman.ConsoleWindow import (
+from console_window import (
     ConsoleWindow, ConsoleWindowOpts, OptionSpinner,
     ScreenStack, Screen
 )

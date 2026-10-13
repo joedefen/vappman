@@ -10,10 +10,11 @@ Initialization order:
 5. Set handled_keys on ConsoleWindow
 """
 import sys
-sys.path.insert(0, '/home/joe/Projects/vappman')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from types import SimpleNamespace
-from vappman.ConsoleWindow import (
+from console_window import (
     ConsoleWindow, ConsoleWindowOpts, OptionSpinner,
     ScreenStack, Screen
 )
