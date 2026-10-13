@@ -124,18 +124,18 @@ class HomeScreen(VappmanScreen):
         app = self.app
         win = self.win
         all_dbs = bool(app.opts.database == 'ALL')
+        # While the incremental search bar is active, suppress the selected-line
+        # highlight so the pattern being typed is visually unambiguous.
+        searching = app.search_bar.is_active
+        selected_key = None
 
-        def wanted(ns):
-            nonlocal app, all_dbs
-            if not all_dbs and app.opts.database != ns.db:
-                return False
-            if not app.filter:
-                return True
-            if not ns:
-                return False
-            return app.filter.search(ns.appname + ' @' + ns.db + ' ' + ns.synopsis)
+        wanted = app._make_wanted()
 
-        win.set_pick_mode(True)
+        def picked(row_idx):
+            """True when the given row should be shown as the selected line."""
+            return not searching and row_idx == win.pick_pos
+
+        win.set_pick_mode(not searching)
         win.set_demo_mode(app.opts.demo_mode)
 
         title = "APPMAN"
@@ -168,7 +168,7 @@ class HomeScreen(VappmanScreen):
                 line += f'{name:<{wid}} '
                 first_synopsis_offset = len(line)
 
-                if idx == win.pick_pos:
+                if picked(idx):
                     wraps = self.get_folded_synopsis(first_synopsis_offset, fold_offset, ns.synopsis)
                     line += wraps[0]
                 else:
@@ -177,7 +177,8 @@ class HomeScreen(VappmanScreen):
                 status = "installed" if app.in_system_mode or 'U' in where else "uninstalled"
                 win.add_body(line, context=Context(status, info=ns))
 
-                if idx == win.pick_pos:
+                if picked(idx):
+                    selected_key = (appname, db)
                     #wraps.append(f'🅥 {ns.version} {ns.app_type}')
                     wraps.append(f'🠞 {ns.version} {ns.app_type}')
                     self.add_folded_synopsis_lines(fold_offset, wraps, num=2)
@@ -200,7 +201,7 @@ class HomeScreen(VappmanScreen):
                 first_synopsis_offset = len(line)
 
                 # Calculate offsets for uninstalled apps
-                if idx == win.pick_pos:
+                if picked(idx):
                     wraps = self.get_folded_synopsis(first_synopsis_offset, fold_offset, ns.synopsis)
                     line += wraps[0]
                 else:
@@ -208,10 +209,15 @@ class HomeScreen(VappmanScreen):
 
                 win.add_body(line, context=Context("uninstalled", info=ns))
 
-                if idx == win.pick_pos:
+                if picked(idx):
+                    selected_key = (appname, db)
                     self.add_folded_synopsis_lines(fold_offset, wraps)
 
                 idx += 1
+
+        # Remember which app is selected (by identity) so callers can keep the
+        # cursor on it after the set of rows changes.
+        app.pick_identity = selected_key
 
         #############################################
         # Create HEADER LINES
@@ -344,6 +350,10 @@ class HomeScreen(VappmanScreen):
     def slash_ACTION(self):
         """ Enter search-as-you-type mode """
         app = self.app
+        # Remember which app is selected now so the same logical selection can
+        # be restored even if the edit reorders/reindexes the filtered list.
+        keys = app.visible_app_keys()
+        app.search_anchor = keys[app.win.pick_pos] if 0 <= app.win.pick_pos < len(keys) else None
         # Start search with current filter text
         app.search_bar.start(app.search_bar.text)
         # Enable pass-through mode so all printable keys are returned
@@ -399,6 +409,12 @@ class Vappman(Prerequisites):
             on_accept=lambda text: self._on_search_accept(text),
             on_cancel=lambda text: self._on_search_cancel(text)
         )
+        # Identity (appname, db) of the app selected when search began; used to
+        # re-locate the same logical selection after the filter changes.
+        self.search_anchor = None
+        # Identity (appname, db) of the currently picked row, refreshed on each
+        # draw; lets callers follow the app when the set of rows changes.
+        self.pick_identity = None
         # self.basics, _ = self.cmd_dict('list')
         self.terminal_emulator = None
         self.has_am = None
@@ -627,6 +643,7 @@ class Vappman(Prerequisites):
     def main_loop(self):
         """Main application loop using screen stack navigation."""
         win = self.win
+        last_database = self.opts.database
 
         while True:
             # Get and draw current screen
@@ -635,9 +652,12 @@ class Vappman(Prerequisites):
 
             win.render()
             key = win.prompt(seconds=self.next_prompt_seconds[0])
+            # The background list refresh replaces every available row; keep the
+            # cursor on the same app so it does not silently jump.
             if self.cache_mgr.check_for_updates(): # this happens once at most
                 self.apps_by_name_db = self.cache_mgr.apps_by_key
                 self.installs, self.installs_by_appname = self.get_installed(repull=False)
+                self.restore_selection(self.pick_identity)
 
             # Adjust prompt timing (fast initially, then slower)
             self.next_prompt_seconds.pop(0)
@@ -667,19 +687,30 @@ class Vappman(Prerequisites):
                     # Actions delegated to screen classes - automatically handled
                     self.ss.perform_actions(self.spin)
 
+                    # The 'd' key cycles databases, replacing every row; keep the
+                    # cursor on the same app when it exists in the new database.
+                    if self.opts.database != last_database:
+                        last_database = self.opts.database
+                        self.restore_selection(self.pick_identity)
+
             win.clear()
 
     def _on_search_accept(self, text):
         """Callback when search is accepted (ENTER pressed)"""
         self.win.passthrough_mode = False
-        # Jump to top if filter changed
-        if self.search_bar._start_text != text:
-            self.win.pick_pos = 0
+        # Re-select the app that was current when search began (falls back to
+        # the top of the list if the pattern no longer matches it).
+        self._restore_selection()
+        self.search_anchor = None
 
     def _on_search_cancel(self, text):
         """Callback when search is cancelled (ESC pressed)"""
         self.win.passthrough_mode = False
-        # Filter already restored by on_change callback
+        # ESC restores the original search text but does NOT emit on_change, so
+        # re-apply the filter for the restored text before re-selecting.
+        self.compile_filter(text)
+        self._restore_selection()
+        self.search_anchor = None
 
     def compile_filter(self, pattern):
         """Compile filter pattern and update display immediately"""
@@ -696,6 +727,76 @@ class Vappman(Prerequisites):
         except Exception:
             self.filter = None  # Invalid regex - show no matches
 
+    def _make_wanted(self):
+        """Build the row predicate for the current database/filter settings.
+
+        Single source of truth for which rows are displayed; shared by both the
+        render loop and the selection-restore logic so they cannot drift.
+        """
+        app = self
+        all_dbs = bool(app.opts.database == 'ALL')
+
+        def wanted(ns):
+            if not all_dbs and app.opts.database != ns.db:
+                return False
+            if not app.filter:
+                return True
+            if not ns:
+                return False
+            return app.filter.search(ns.appname + ' @' + ns.db + ' ' + ns.synopsis)
+
+        return wanted
+
+    def visible_app_keys(self):
+        """Return (appname, db) for each displayed row, in display order.
+
+        Installed apps are listed first, then available ones, exactly matching
+        the order used by HomeScreen.draw_screen().
+        """
+        wanted = self._make_wanted()
+        keys = []
+        for (appname, db), ns in self.installs.items():
+            if ns and wanted(ns):
+                keys.append((appname, db))
+        for (appname, db), ns in self.apps_by_name_db.items():
+            if (appname, db) not in self.installs and wanted(ns):
+                keys.append((appname, db))
+        return keys
+
+    def selected_app_key(self):
+        """Return the (appname, db) of the currently picked row, or None."""
+        keys = self.visible_app_keys()
+        if 0 <= self.win.pick_pos < len(keys):
+            return keys[self.win.pick_pos]
+        return None
+
+    def restore_selection(self, anchor, fallback_to_top=False):
+        """Re-locate the pick by app identity after the set of rows changes.
+
+        The cursor "follows the app": if `anchor` is still displayed -- even at a
+        new position -- it becomes the selection again. When the app is gone,
+        either jump to the top (fallback_to_top=True) or keep the current index
+        clamped to the new list length (fallback_to_top=False).
+
+        :param anchor: (appname, db) identity to keep selected; None is a no-op.
+        :param fallback_to_top: behaviour when the anchored app is no longer shown.
+        """
+        if anchor is None:
+            return
+        keys = self.visible_app_keys()
+        if not keys:
+            self.win.pick_pos = 0
+        elif anchor in keys:
+            self.win.pick_pos = keys.index(anchor)
+        elif fallback_to_top:
+            self.win.pick_pos = 0
+        else:
+            self.win.pick_pos = min(self.win.pick_pos, len(keys) - 1)
+
+    def _restore_selection(self):
+        """Search-exit hook: keep the anchored app selected, else go to top."""
+        self.restore_selection(self.search_anchor, fallback_to_top=True)
+
     def get_keys_line(self):
         """ Build header line with fancy formatting markup (static actions only) """
         # Static actions with markup for fancy headers
@@ -709,6 +810,9 @@ class Vappman(Prerequisites):
     def run_appman(self, subcommand: str, info: SimpleNamespace = None):
         """ Run an 'appman' command using subprocess. """
 
+        # Remember the selected app so the cursor can follow it back after the
+        # command changes which rows exist or where they sit.
+        anchor = self.selected_app_key()
         appname = info.appname if info else None
         # 1. Build the command list
         cmd = ['appman' if self.has_appman else 'am']
@@ -753,6 +857,9 @@ class Vappman(Prerequisites):
 
         # 6. Update installs and restart curses environment
         self.installs, self.installs_by_appname = self.get_installed()
+        # Install/remove (and mode toggles) move the selected app between the
+        # installed and available sections; keep the cursor on the same *app*.
+        self.restore_selection(anchor)
         ConsoleWindow._start_curses()
 
 def main():

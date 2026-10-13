@@ -116,6 +116,8 @@ Press `?` to see full navigation help. Common keys include:
 * Arrow keys, Page Up/Down, Home/End - Navigate the app list
 * Mouse wheel - Scroll through apps
 * Vi-like keys: `j`/`k` (down/up), `g`/`G` (top/bottom), `Ctrl-f`/`Ctrl-b` (page down/up)
+* The selection follows the *app*: after you install, remove, update, or switch
+  mode/database, the cursor stays on the same app — or the nearest row if it's gone
 * `ENTER` - Context-sensitive action:
   * On uninstalled app: Install it
   * On installed app: Uninstall it
@@ -141,6 +143,11 @@ Press `/` to start filtering. The filter supports two modes:
 * `ENTER` - Accept filter and return to browsing
 * `ESC` - Cancel filter edit (restores previous filter)
 * Typing updates results in real-time
+* While you are typing, no line is shown as selected (the selection highlight is
+  hidden until you press `ENTER` or `ESC`), so the pattern being entered is unambiguous
+* Your selection follows the *app*, not the row: if the app you had selected still
+  matches after the filter changes — even if it moved position — it is re-selected
+  on `ENTER`/`ESC`. If it no longer matches, the top of the list is selected
 
 #### App-Specific Keys (Second Line)
 
