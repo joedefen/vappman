@@ -135,6 +135,7 @@ class VAppConfigParser:
 
 class AppCacheManager:
     def __init__(self, cache_duration=3600):
+        self.appman_config_file = os.path.expanduser("~/.config/appman/appman-config")
         self.config_dir = os.path.expanduser("~/.config/vappman")
         self.list_file = os.path.join(self.config_dir, "list-all.txt")
         self.cache_duration = cache_duration
@@ -145,9 +146,20 @@ class AppCacheManager:
         self.runner = None
 
     def _find_binary(self):
+        binary = None
         for cmd in ["am", "appman"]:
-            if shutil.which(cmd): return cmd
-        raise RuntimeError("Neither 'am' nor 'appman' found in PATH.")
+            if shutil.which(cmd):
+                binary = cmd
+                break
+        if not binary:
+            raise RuntimeError("Neither 'am' nor 'appman' found in PATH.")
+        if binary == "appman" and not os.path.isfile(self.appman_config_file):
+            raise RuntimeError(
+                f"appman config ({self.appman_config_file}) not found.\n"
+                "TO FIX: run 'appman' from a terminal to complete setup."
+            )
+
+        return binary
 
     def _parse_now(self):
         parser = VAppConfigParser(self.list_file)
@@ -165,7 +177,6 @@ class AppCacheManager:
         if not os.path.exists(self.list_file):
             # print("[Cache] No file found. Fetching initial list...")
             self.refresh_background()
-            print('Fetching initial app list [IF STUCK, press ENTER several times]...')
             while self.runner.is_running(): time.sleep(0.1)
             print('... got initial app list ... continuing up ...')
             self._parse_now()
