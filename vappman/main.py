@@ -26,7 +26,7 @@ import curses as cs
 from console_window import (
     ConsoleWindow, OptionSpinner, ConsoleWindowOpts,
     Screen, ScreenStack, BasicHelpScreen, Context,
-    IncrementalSearchBar
+    IncrementalSearchBar, InlineConfirmation
 )
 from .PersistentState import PersistentState
 from .AppmanVars import AppmanVars, AppLocation
@@ -38,6 +38,54 @@ from . import AppimageDoctor
 # Screen constants
 HOME_ST, HELP_ST = 0, 1
 SCREENS = ['HOME', 'HELP']
+
+# Install options offered by the inline install prompt: (key, label, am flags).
+# The persisted `install_opts` is the "last used" choice that '*' and 'y' refer
+# to.  Keys avoid 'i' (the key that opens the prompt) and are single strokes.
+INSTALL_OPTIONS = (
+    ('n', 'none', ''),
+    ('s', 'sandbox', 'sandbox'),
+    ('c', 'icons', 'icons'),
+    ('b', 'both', 'icons,sandbox'),
+)
+INSTALL_OPTION_KEYS = {ord(key): flags for key, _, flags in INSTALL_OPTIONS}
+
+
+def _install_option_key(install_opts):
+    """Return the menu key matching a persisted `install_opts` value."""
+    flags = frozenset(x for x in (install_opts or '').split(',') if x)
+    for key, _, value in INSTALL_OPTIONS:
+        if frozenset(x for x in value.split(',') if x) == flags:
+            return key
+    return 'n'
+
+
+def install_options_legend(install_opts):
+    """One-line key legend for the install prompt; '*' marks the last choice."""
+    active = _install_option_key(install_opts)
+    parts = [f'{"*" if key == active else ""}{key}:{label}'
+             for key, label, _ in INSTALL_OPTIONS]
+    return ' '.join(parts) + ' y:last ESC'
+
+
+# Installed-row actions that get the same inline y/ESC prompt as remove.
+# The key is the confirmation action_type; its value labels the prompt.
+INSTALLED_ACTION_LABELS = {
+    'remove': 'Remove',
+    'backup': 'Backup',
+    'sandbox': 'Sandbox',
+    'unsandbox': 'Unsandbox',
+    'icons': 'Set icons for',
+}
+
+# Commands vappman has already confirmed inline, so AM's own final yes/no must
+# be suppressed with its global -y/--assume-yes (which must be argv[1]).
+# NOTE: for --sandbox, AM's -y also answers its "configure directory access"
+# prompts with yes, granting the app access to every XDG user directory.  Drop
+# '--sandbox' from this set to let AM ask those questions interactively.
+ASSUME_YES_COMMANDS = frozenset({
+    'install', 'remove', 'backup', '--icons', '--sandbox', '--disable-sandbox',
+})
 
 class VappmanScreen(Screen):
     """ Base class for all VappmanScreens"""
@@ -117,6 +165,27 @@ class HomeScreen(VappmanScreen):
             return wraps
         return [text]
 
+    def _confirming_action(self, ns, action):
+        """True when the inline `action` confirmation is waiting on row `ns`."""
+        app = self.app
+        pending = app.pending_action
+        info = pending[1] if pending else None
+        # Compare identities, not object identity: a background list refresh
+        # can replace the row namespaces while the prompt is still open.
+        return (app.confirmation.active
+                and app.confirmation.action_type == action
+                and info is not None
+                and (ns.appname, ns.db) == (info.appname, info.db))
+
+    def _confirmation_prompt(self):
+        """Prompt row text for the active installed-app action ('' for install)."""
+        app = self.app
+        label = INSTALLED_ACTION_LABELS.get(app.confirmation.action_type or '')
+        pending = app.pending_action
+        if label is None or pending is None:
+            return ''
+        return f'    ⚠️  {label} {pending[1].appname}? Press y or ESC'
+
 
     def draw_screen(self):
         """Draw the home screen with app list  ⮜–⮞
@@ -182,8 +251,17 @@ class HomeScreen(VappmanScreen):
                     #wraps.append(f'🅥 {ns.version} {ns.app_type}')
                     wraps.append(f'🠞 {ns.version} {ns.app_type}')
                     self.add_folded_synopsis_lines(fold_offset, wraps, num=2)
-                    # line = f'{"":<13}  ╰── {ns.version} {ns.app_type}'
-                    # win.add_body(line, context=Context("TRANSIENT"))
+                    if self._confirming_action(ns, app.confirmation.action_type):
+                        prompt = self._confirmation_prompt()
+                        if prompt:
+                            # Below the entry's own rows, so the synopsis and
+                            # version/type stay readable while deciding.
+                            # TRANSIENT (non-pickable) so the engine's auto-abut
+                            # reserves the row even when the pick sits at the
+                            # viewport bottom.
+                            win.add_body(
+                                prompt, attr=cs.A_BOLD,
+                                context=Context("TRANSIENT", pickable=False))
                 idx += 1
 
         #############################################
@@ -212,6 +290,20 @@ class HomeScreen(VappmanScreen):
                 if picked(idx):
                     selected_key = (appname, db)
                     self.add_folded_synopsis_lines(fold_offset, wraps)
+                    if self._confirming_action(ns, 'install'):
+                        # Prompt and menu go below the entry's rows (including
+                        # the synopsis continuation) so the details stay visible.
+                        # TRANSIENT (non-pickable) so the engine's auto-abut
+                        # reserves both lines -- a DECOR row would not be
+                        # counted, and the prompt could fall off-screen.
+                        win.add_body(
+                            f'    ⚠️  Install {appname}?',
+                            attr=cs.A_BOLD,
+                            context=Context("TRANSIENT", pickable=False))
+                        win.add_body(
+                            '    ' + install_options_legend(app.opts.install_opts),
+                            attr=cs.A_DIM,
+                            context=Context("TRANSIENT", pickable=False))
 
                 idx += 1
 
@@ -224,7 +316,7 @@ class HomeScreen(VappmanScreen):
         #############################################
         header1 = f'{title}  {app.get_keys_line()}'
         # Use fancy header formatting to highlight keys automatically
-        win.add_fancy_header(header1, app.opts.fancy_header)
+        win.add_fancy_header(header1, app.opts.fancy_header, line_attr=cs.A_DIM)
 
         # Build dynamic action keys (e.g., " [r]mv [u]pd [b]kup")
         # Get base header line and combine with dynamic actions
@@ -247,9 +339,9 @@ class HomeScreen(VappmanScreen):
                 if conflicts:
                     header2 += f' install-conflicts={conflicts}'
                 else:
-                    header2 += f' [i]nstall [a]bout O:opts={app.opts.install_opts}'
+                    header2 += ' [i]nstall [a]bout'
 
-        win.add_fancy_header(header2, app.opts.fancy_header)
+        win.add_fancy_header(header2, app.opts.fancy_header, line_attr=cs.A_DIM)
 
     def appman_on_installed(self, verb):
         """ TBD """
@@ -257,36 +349,41 @@ class HomeScreen(VappmanScreen):
         if context and context.genre == 'installed':
             self.app.run_appman(verb, context.info)
 
+    def _confirm_installed_action(self, action, verb):
+        """Ask inline y/ESC before running `verb` on the picked installed app."""
+        app = self.app
+        context = self.win.get_picked_context()
+        if context and context.genre == 'installed':
+            # Don't run appman yet: draw the prompt below this row and let
+            # 'y' (confirm) or ESC (abort) decide in Vappman.main_loop().
+            app.pending_action = (verb, context.info)
+            app.confirmation.start(action, context.info.appname, mode='y')
+            self.win.passthrough_mode = True
+
     def remove_ACTION(self):
-        """ TBD """
-        return self.appman_on_installed('remove')
+        self._confirm_installed_action('remove', 'remove')
 
     def update_ACTION(self):
         """ TBD """
         return self.appman_on_installed('update')
 
     def backup_ACTION(self):
-        """ TBD """
-        return self.appman_on_installed('backup')
+        self._confirm_installed_action('backup', 'backup')
 
     def overwrite_ACTION(self):
         """ TBD """
         self.appman_on_installed('overwrite')
 
     def sandbox_ACTION(self):
-        """ TBD """
         context = self.win.get_picked_context()
-
-        if context.genre == "installed":
+        if context and context.genre == 'installed':
             if self.is_sandboxed(context.info):
-                verb = '--disable-sandbox'
+                self._confirm_installed_action('unsandbox', '--disable-sandbox')
             else:
-                verb = '--sandbox'
-            self.appman_on_installed(verb)
+                self._confirm_installed_action('sandbox', '--sandbox')
 
     def icons_ACTION(self):
-        """ TBD """
-        self.appman_on_installed('--icons')
+        self._confirm_installed_action('icons', '--icons')
 
     def about_ACTION(self):
         """ TBD """
@@ -313,10 +410,16 @@ class HomeScreen(VappmanScreen):
 
     #################################
     def install_ACTION(self):
-        """ TBD """
+        """Ask for an inline y/ESC confirmation before installing the picked app."""
+        app = self.app
         context = self.win.get_picked_context()
         if context and context.genre == 'uninstalled':
-            self.app.run_appman('install', context.info)
+            # Don't run appman yet: draw the inline prompt on this row and let
+            # 'y' (confirm) or ESC (abort) decide in Vappman.main_loop().
+            app.pending_action = ('install', context.info)
+            app.confirmation.start('install', context.info.appname, mode='y')
+            # Keep navigation keys from moving the pick while we are asking.
+            self.win.passthrough_mode = True
 
     #################################
     def reinstall_ACTION(self):
@@ -409,6 +512,11 @@ class Vappman(Prerequisites):
             on_accept=lambda text: self._on_search_accept(text),
             on_cancel=lambda text: self._on_search_cancel(text)
         )
+        # Inline (y / ESC) confirmation for the picked app's install/remove
+        # action.  HomeScreen draws the prompt on the row; main_loop routes keys
+        # to it.  pending_action is (subcommand, info) for the confirmed action.
+        self.confirmation = InlineConfirmation()
+        self.pending_action = None
         # Identity (appname, db) of the app selected when search began; used to
         # re-locate the same logical selection after the filter changes.
         self.search_anchor = None
@@ -472,8 +580,6 @@ class Vappman(Prerequisites):
         spin.add_key('escape_filter', 'ESC - clear filter and jump to top', genre='action', keys=27)
 
         spin.add_key('install', 'i - install uninstalled app', genre='action')
-        spin.add_key('install_opts', 'O - install options', vals=[
-                                '', 'icons', 'sandbox', 'icons,sandbox'])
         spin.add_key('default', 'ENTER - install/uninstall app',
                      genre='action', keys=[cs.KEY_ENTER, 10])
         spin.add_key('remove', 'r - remove installed app', genre='action')
@@ -665,8 +771,12 @@ class Vappman(Prerequisites):
                 self.next_prompt_seconds = [3.0]
 
             if key is not None:
-                # Handle search mode keys first (MUST be before spin.do_key)
-                if self.search_bar.handle_key(key):
+                # The inline confirmation owns the keyboard while it is up:
+                # only 'y' (confirm) and ESC (cancel) are meaningful.
+                if self.confirmation.active:
+                    self._handle_confirmation_key(key)
+                # Handle search mode keys next (MUST be before spin.do_key)
+                elif self.search_bar.handle_key(key):
                     # Key was handled by search bar, skip normal processing
                     pass
                 else:
@@ -694,6 +804,54 @@ class Vappman(Prerequisites):
                         self.restore_selection(self.pick_identity)
 
             win.clear()
+
+    def _handle_confirmation_key(self, key):
+        """Route one key to the active inline install/remove confirmation."""
+        if self.confirmation.action_type == 'install':
+            self._handle_install_choice(key)
+            return
+        if key == ord('Y'):
+            key = ord('y')  # accept Shift-Y as 'yes' too
+        result = self.confirmation.handle_key(key)
+        if result == 'confirmed':
+            pending = self.pending_action
+            self._cancel_confirmation()
+            if pending is not None:
+                subcommand, info = pending
+                self.run_appman(subcommand, info)
+        elif result == 'cancelled':
+            self._cancel_confirmation()
+        # 'continue' means "neither y nor ESC": since those are the only two
+        # valid answers, every other key is deliberately swallowed.
+
+    def _handle_install_choice(self, key):
+        """Handle the one-key install menu: n/s/c/b, or y for the last choice."""
+        if ord('A') <= key <= ord('Z'):
+            key += ord('a') - ord('A')
+        if key == 27:  # ESC aborts the install
+            self._cancel_confirmation()
+            return
+        if key == ord('y'):
+            flags = self.opts.install_opts  # '*' / last confirmed choice
+        else:
+            flags = INSTALL_OPTION_KEYS.get(key)
+            if flags is None:
+                return  # only the menu keys are valid here
+        pending = self.pending_action
+        # Remember the choice before running: it becomes the '*' for next time.
+        # Persist immediately so an early exit or a failing AM command cannot
+        # lose the user's choice.
+        self.opts.install_opts = flags
+        self.disk_state.save_if_changed(self.opts)
+        self._cancel_confirmation()
+        if pending is not None:
+            self.run_appman(*pending)
+
+    def _cancel_confirmation(self):
+        """Drop any pending inline confirmation and re-enable normal keys."""
+        self.confirmation.cancel()
+        self.pending_action = None
+        self.win.passthrough_mode = False
 
     def _on_search_accept(self, text):
         """Callback when search is accepted (ENTER pressed)"""
@@ -807,15 +965,15 @@ class Vappman(Prerequisites):
         return line
 
 
-    def run_appman(self, subcommand: str, info: SimpleNamespace = None):
-        """ Run an 'appman' command using subprocess. """
-
-        # Remember the selected app so the cursor can follow it back after the
-        # command changes which rows exist or where they sit.
-        anchor = self.selected_app_key()
+    def _build_appman_cmd(self, subcommand: str, info: SimpleNamespace = None):
+        """Build the appman/am argv for one command (pure, easy to test)."""
         appname = info.appname if info else None
-        # 1. Build the command list
         cmd = ['appman' if self.has_appman else 'am']
+        if subcommand in ASSUME_YES_COMMANDS:
+            # AM's global --assume-yes/-y must be the *first* argument.  The
+            # user has already confirmed in vappman's inline prompt, so AM must
+            # not ask a second time.
+            cmd.append('-y')
         cmd.append(subcommand)
         if subcommand == 'install':
             for opt in self.opts.install_opts.strip().split(','):
@@ -827,9 +985,21 @@ class Vappman(Prerequisites):
                 appname += f'.{info.db}'
         if appname:
             cmd.append(appname)
+        return cmd
 
-        # 2. Stop curses environment
-        ConsoleWindow.stop_curses()
+    def run_appman(self, subcommand: str, info: SimpleNamespace = None):
+        """ Run an 'appman' command using subprocess. """
+
+        # Remember the selected app so the cursor can follow it back after the
+        # command changes which rows exist or where they sit.
+        anchor = self.selected_app_key()
+        # 1. Build the command list
+        cmd = self._build_appman_cmd(subcommand, info)
+
+        # 2. Leave curses but keep the window alive: endwin() restores the tty
+        # (so appman and the ENTER prompt work) and render() re-enters curses
+        # afterwards.  stop_curses() would tear the window down for good.
+        cs.endwin()
         os.system('clear; stty sane')
 
         # 3. Print the command being executed for user confirmation/debugging
@@ -855,12 +1025,12 @@ class Vappman(Prerequisites):
         # 5. Wait for user input to return (similar to your original 'read FOO')
         input('\n\n===== Press ENTER to return to vappman ====> ')
 
-        # 6. Update installs and restart curses environment
+        # 6. Update installs and re-enter curses (doupdate() in render does it)
         self.installs, self.installs_by_appname = self.get_installed()
         # Install/remove (and mode toggles) move the selected app between the
         # installed and available sections; keep the cursor on the same *app*.
         self.restore_selection(anchor)
-        ConsoleWindow._start_curses()
+        self.win.render(redraw=True)
 
 def main():
     """ The program """

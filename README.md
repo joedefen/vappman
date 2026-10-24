@@ -152,29 +152,48 @@ Press `/` to start filtering. The filter supports two modes:
 #### App-Specific Keys (Second Line)
 
 **For UNINSTALLED apps:**
-* `i` or `ENTER` - Install the app
-* `O` - Cycle through install options:
-  * `` (none) - Default install
-  * `icons` - Use system icon themes
-  * `sandbox` - Run in sandboxed environment
-  * `icons,sandbox` - Both options
+* `i` or `ENTER` - Install the app. A prompt appears *below* the entry's rows
+  (so the synopsis stays readable), followed by the install-type menu:
+  ```
+      ⚠️  Install <app>?
+      *n:none s:sandbox c:icons b:both y:last ESC
+  ```
+  * `n` - plain install
+  * `s` - sandboxed
+  * `c` - system icon themes
+  * `b` - both `icons` and `sandbox`
+  * `y` - reuse the starred (last-used) choice
+  * `ESC` - cancel the install
+  * The `*` marks the options used by the last confirmed install; that choice is
+    remembered across sessions. The confirmed command is run with `-y`, so
+    `am/appman` does not ask again
 * **Note**: If an app with the same name is installed from another database, you'll see a conflict warning instead of install keys
 
 **For INSTALLED apps:**
 * `r` or `ENTER` - Remove the app
-* `u` - Update this app
 * `C` - Change AppImage to use system icons
-* `a` - Show "about" information from `am/appman`
 * `S` - Toggle sandbox mode (box/unbox)
 * `b` - Backup the app
+* `u` - Update this app
+* `a` - Show "about" information from `am/appman`
 * `o` - Overwrite app from its backup (shows count of available backups)
 * `t` - Test the app by running it in a terminal
+
+For `r`, `C`, `S` and `b`, a prompt appears below the entry's rows (synopsis and
+version/type remain visible), e.g. `⚠️  Remove <app>? Press y or ESC`; `y`
+confirms, `ESC` cancels, and all other keys are ignored until you answer. The
+confirmed command is run with `-y`, so `am/appman` does not ask again.
+
+**Note on sandboxing:** AM's `-y` also accepts its directory-access questions for
+`--sandbox`, which grants the sandboxed app access to the XDG user folders
+(Desktop, Documents, Downloads, etc.). Run `am --sandbox <app>` manually after
+if you want to choose those folders yourself.
 
 #### App List Display
 
 The main screen shows installed apps first (marked with `✔` or `🔒`), followed by available/uninstalled apps (marked with `◆`).
 
-When you install or remove an app, `vappman` temporarily exits the TUI, runs the `am/appman` command so you can see the result, then prompts you to press ENTER to return.
+When you install or remove an app, `vappman` temporarily exits the TUI, runs the `am/appman` command so you can see the result, then prompts you to press ENTER to return. Install and remove commands confirmed in the TUI are passed `-y`, so the single confirmation is vappman's inline prompt.
 
 #### Testing Apps
 
