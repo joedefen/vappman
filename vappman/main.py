@@ -28,8 +28,9 @@ from console_window import (
     Screen, ScreenStack, BasicHelpScreen, Context,
     IncrementalSearchBar, InlineConfirmation
 )
+from . import __version__
 from .PersistentState import PersistentState
-from .AppmanVars import AppmanVars, AppLocation
+from .AppmanVars import AppmanVars
 from .AppmanLauncher import AppmanLauncher
 from .Prerequisites import Prerequisites
 from .VappmanListCache import AppCacheManager
@@ -1037,6 +1038,9 @@ def main():
     parser = argparse.ArgumentParser( prog='vappman',
         description='Interactive TUI for appman - application manager',
         epilog='Run without options to start the interactive TUI')
+    parser.add_argument('--version', action='version',
+        version=f'%(prog)s {__version__}',
+        help='Show the vappman version and exit')
     parser.add_argument( '--doctor', '--system-check',
         action='store_true', dest='check_appimage',
         help='Check system for AppImage compatibility issues')

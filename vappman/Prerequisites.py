@@ -10,10 +10,8 @@
 # pylint: disable=line-too-long,protected-access,invalid-name
 
 import sys
-import re
 import shutil
 import subprocess
-from types import SimpleNamespace
 
 class Prerequisites:
     """ Detect / install prereqs """
@@ -63,7 +61,7 @@ class Prerequisites:
         pm_name, install_cmd_template = self.detect_package_manager()
 
         if not pm_name:
-            print(f'\nERROR: Cannot find supported package manager.')
+            print('\nERROR: Cannot find supported package manager.')
             print(f'Missing dependencies: {", ".join(sorted(missing))}')
             print('Please install them manually using your system package manager.')
             return False
@@ -74,7 +72,7 @@ class Prerequisites:
             print(f'\n⚠️  Missing dependencies: {", ".join(packages)}')
             print(f'\nDetected package manager: {pm_name}')
 
-            response = input(f'\nInstall missing dependencies? [y/N]: ').strip().lower()
+            response = input('\nInstall missing dependencies? [y/N]: ').strip().lower()
 
             if response not in ('y', 'yes'):
                 print('Installation cancelled.')
@@ -96,7 +94,7 @@ class Prerequisites:
                     print('  - Check for problematic PPAs in /etc/apt/sources.list.d/')
                     print('  - Remove outdated PPAs that block apt operations')
                 return False
-            print(f'\n✅ Dependencies installed successfully!')
+            print('\n✅ Dependencies installed successfully!')
             return True
         except Exception as exc:
             print(f'\n❌ Installation failed: {exc}')
@@ -143,7 +141,7 @@ class Prerequisites:
             if result.returncode != 0:
                 print(f'\n❌ AM installation failed with exit code {result.returncode}')
                 return False
-            print(f'\n✅ AM/appman installed successfully!')
+            print('\n✅ AM/appman installed successfully!')
             return True
         except Exception as exc:
             print(f'\n❌ AM installation failed: {exc}')
@@ -229,7 +227,7 @@ class Prerequisites:
             print(f'\n⚠️  Optional dependencies missing: {", ".join(sorted(missing_optional))}')
             print('    Some features may not work without these packages.')
 
-            response = input(f'\nInstall optional dependencies? [y/N]: ').strip().lower()
+            response = input('\nInstall optional dependencies? [y/N]: ').strip().lower()
             if response in ('y', 'yes'):
                 if not self.install_dependencies(packages_needed, skip_prompt=True):
                     optional_install_failed = True

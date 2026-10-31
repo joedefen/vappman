@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import json
-import os
 from pathlib import Path
 
 class PersistentState:
@@ -36,7 +35,7 @@ class PersistentState:
 
             # 2. Check if types match the defaults
             for key, value in data.items():
-                if type(value) != type(self._defaults[key]):
+                if type(value) is not type(self._defaults[key]):
                     raise TypeError(f"Type mismatch for {key}.")
 
             # If valid, update the object attributes

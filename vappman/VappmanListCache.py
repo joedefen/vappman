@@ -168,7 +168,8 @@ class AppCacheManager:
             self.apps, self.apps_by_key, self.dbs = apps, apps_by_key, databases
 
     def refresh_background(self):
-        if self.runner and self.runner.is_running(): return
+        if self.runner and self.runner.is_running():
+            return
         os.makedirs(self.config_dir, exist_ok=True)
         self.runner = CommandRunner([self.binary, "list", "--all"], self.list_file)
         self.runner.start()
@@ -177,7 +178,8 @@ class AppCacheManager:
         if not os.path.exists(self.list_file):
             # print("[Cache] No file found. Fetching initial list...")
             self.refresh_background()
-            while self.runner.is_running(): time.sleep(0.1)
+            while self.runner.is_running():
+                time.sleep(0.1)
             print('... got initial app list ... continuing up ...')
             self._parse_now()
         else:
@@ -210,7 +212,7 @@ if __name__ == "__main__":
     dup_count = sum(1 for entries in apps.values() if len(entries) > 1)
     total_entries = sum(len(entries) for entries in apps.values())
 
-    print(f"Initial Load:")
+    print("Initial Load:")
     print(f"  - {len(apps)} unique app names")
     print(f"  - {total_entries} total entries")
     print(f"  - {dup_count} app names with duplicates")

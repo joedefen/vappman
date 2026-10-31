@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from types import SimpleNamespace
 
 
 def test_init_order():
@@ -34,7 +33,7 @@ def test_init_order():
     from console_window import OptionSpinner
 
     SCREENS = ('HOME', 'SETTINGS', 'HELP')
-    HOME_ST, SETTINGS_ST, HELP_ST = 0, 1, 2
+    HOME_ST = 0  # scope index of the HOME screen
 
     # Mock ScreenStack
     class MockScreenStack:
@@ -59,7 +58,7 @@ def test_init_order():
     print("\nStep 3: Create OptionSpinner (fills stack.obj)")
     spinner = OptionSpinner(stack=stack)
     assert stack.obj is spinner.default_obj
-    print(f"  ✓ stack.obj now set to spinner.default_obj")
+    print("  ✓ stack.obj now set to spinner.default_obj")
 
     # Step 4: Add keys to spinner
     print("\nStep 4: Add keys to spinner")

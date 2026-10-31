@@ -76,7 +76,8 @@ class AppmanVars:
         """Locates the user's appman directory via config file."""
         try:
             config_file = self._config_base / "appman" / "appman-config"
-            if not config_file.exists(): return None
+            if not config_file.exists():
+                return None
             raw_path = config_file.read_text(encoding='utf-8').strip()
             path_obj = Path(raw_path)
             if not path_obj.is_absolute():

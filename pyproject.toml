@@ -4,7 +4,10 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "vappman"
-version = "2.2.0"
+# `vappman/__init__.py:__version__` is the single source of truth.  Flit reads
+# it at build time, so `bless` can rewrite a throwaway X.Y.Z.99.N in a copy
+# without touching the tree.
+dynamic = ["version"]
 description = "A visual wrapper for appman"
 authors = [
     { name = "Joe Defen", email = "joedef@google.com" }
@@ -36,7 +39,31 @@ vappman = "vappman.main:main"
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
+# The release gate (`./bless`) runs ruff, compileall and pytest with coverage,
+# then builds, inspects, `twine check`s and smoke-installs the artifacts.  Those
+# tools must live in the interpreter that runs bless, and twine/packaging must
+# be new enough to validate Metadata 2.5 from flit_core 3.12.
+dev = [
+    "pytest>=7",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+    "build>=1.2",
+    "twine>=7",
+    "packaging>=26",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.ruff]
+# Keep the lint gate identical on every machine: no global/user config can
+# change which rules the gate enforces.  The selection below is deliberately
+# the conservative, version-stable core; a stricter ratchet can be adopted
+# later without changing bless.
+target-version = "py310"
+line-length = 100
+extend-exclude = ["build", "dist", ".venv"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

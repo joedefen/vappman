@@ -130,12 +130,12 @@ def test_scoped_keys():
 
     print("\n=== Scoped Key Bindings Test ===\n")
     print("Key scope analysis:")
-    print(f"  ESC (quit): applicable to all screens")
-    print(f"  h (help): applicable to all screens")
-    print(f"  s (save): applicable to HOME only")
-    print(f"  e (export): applicable to SETTINGS only")
-    print(f"  r (refresh): applicable to HELP only")
-    print(f"  v (verbose): applicable to all screens")
+    print("  ESC (quit): applicable to all screens")
+    print("  h (help): applicable to all screens")
+    print("  s (save): applicable to HOME only")
+    print("  e (export): applicable to SETTINGS only")
+    print("  r (refresh): applicable to HELP only")
+    print("  v (verbose): applicable to all screens")
     print()
 
     # Check effective scopes
