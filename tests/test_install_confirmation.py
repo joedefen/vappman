@@ -401,11 +401,13 @@ def test_installed_action_prompts_use_their_own_label():
 # semantic_attr keeps the assertions independent of the terminal's palette.
 
 INFO_SENTINEL = 0x4000
+HOTSWAP_SENTINEL = 0x2000
 DANGER_SENTINEL = 0x8000
 
 
 def _sentinel_attr(pair_id):
     return {Theme.INFO: INFO_SENTINEL,
+            Theme.HOTSWAP: HOTSWAP_SENTINEL,
             Theme.DANGER: DANGER_SENTINEL}.get(pair_id, 0)
 
 
@@ -413,21 +415,22 @@ def _run_attrs(attr_runs):
     return [attr for attr, _ in attr_runs]
 
 
-def test_installed_row_uses_the_info_role(monkeypatch):
+def test_installed_row_uses_the_hotswap_role(monkeypatch):
     monkeypatch.setattr(main_module, 'semantic_attr', _sentinel_attr)
 
     *_, attrs = _drawn_screen(True, 'remove')
 
-    assert INFO_SENTINEL in _run_attrs(attrs[0])
+    assert HOTSWAP_SENTINEL in _run_attrs(attrs[0])
+    assert INFO_SENTINEL not in _run_attrs(attrs[0])
     assert DANGER_SENTINEL not in _run_attrs(attrs[0])
 
 
-def test_uninstalled_row_does_not_use_the_info_role(monkeypatch):
+def test_uninstalled_row_does_not_use_the_hotswap_role(monkeypatch):
     monkeypatch.setattr(main_module, 'semantic_attr', _sentinel_attr)
 
     *_, attrs = _drawn_screen(False, 'install')
 
-    assert INFO_SENTINEL not in _run_attrs(attrs[0])
+    assert HOTSWAP_SENTINEL not in _run_attrs(attrs[0])
 
 
 def test_install_prompt_uses_the_danger_role(monkeypatch):

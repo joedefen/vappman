@@ -45,6 +45,7 @@ def test_curses_error_degrades_to_plain(monkeypatch):
 def test_mono_roles_become_attributes(colors_off):
     assert not Appearance.colors_enabled()
     assert Appearance.semantic_attr(Theme.INFO) == curses.A_NORMAL
+    assert Appearance.semantic_attr(Theme.HOTSWAP) == curses.A_NORMAL
     assert Appearance.semantic_attr(Theme.DANGER) == (
         curses.A_BOLD | curses.A_REVERSE)
 

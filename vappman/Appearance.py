@@ -38,6 +38,7 @@ MONO_ROLES = {
     Theme.INFO: curses.A_NORMAL,
     Theme.PROGRESS: curses.A_NORMAL,
     Theme.OLD_SUCCESS: curses.A_NORMAL,
+    Theme.HOTSWAP: curses.A_NORMAL,
 }
 
 # Process-wide switch, seeded at startup by --no-color / NO_COLOR / mono.  One
