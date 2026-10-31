@@ -96,6 +96,8 @@ def wheel_metadata(wheel: Path) -> dict:
         'Requires-Python': message['Requires-Python'],
         'Requires-Dist': message.get_all('Requires-Dist') or [],
         'Keywords': _keyword_set(message['Keywords']),
+        'License-Expression': message['License-Expression'],
+        'License-File': message.get_all('License-File') or [],
     }
 
 
@@ -122,6 +124,8 @@ def check_wheel(wheel: Path, project_table: dict | None = None,
         'Summary': project_table['description'],
         'Requires-Python': project_table['requires-python'],
     }
+    if isinstance(project_table.get('license'), str):
+        expected['License-Expression'] = project_table['license']
     problems: list[str] = []
 
     metadata = wheel_metadata(Path(wheel))
@@ -142,6 +146,12 @@ def check_wheel(wheel: Path, project_table: dict | None = None,
             'Keywords: expected '
             f'{sorted(project_table.get("keywords", []))}, '
             f'found {sorted(metadata["Keywords"])}')
+
+    for declared in project_table.get('license-files') or []:
+        if Path(declared).name not in metadata['License-File']:
+            problems.append(
+                f'License-File: {declared!r} is declared in license-files '
+                f'but the wheel lists {metadata["License-File"]}')
 
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()

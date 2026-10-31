@@ -1,5 +1,7 @@
 [build-system]
-requires = ["flit_core>=3.4"]
+# 3.12 is the first flit_core that understands the PEP 639 license expression
+# and `license-files` declared below; older backends reject them.
+requires = ["flit_core>=3.12"]
 build-backend = "flit_core.buildapi"
 
 [project]
@@ -13,7 +15,11 @@ authors = [
     { name = "Joe Defen", email = "joedef@google.com" }
 ]
 readme = "README.md"
-license = { text = "MIT" }
+# SPDX expression (PEP 639) rather than the deprecated table form: this is what
+# puts `License-Expression: MIT` in the core metadata, which is also why the
+# legacy `License :: ...` classifier below must not come back.
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 keywords = ["app", "installer", "manager", "appimages"]
 classifiers = [
@@ -23,7 +29,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux"
 ]
 dependencies = [
