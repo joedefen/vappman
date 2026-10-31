@@ -35,11 +35,14 @@ from .AppmanLauncher import AppmanLauncher
 from .Prerequisites import Prerequisites
 from .VappmanListCache import AppCacheManager
 from . import AppimageDoctor
-from .Appearance import semantic_attr
+from .Appearance import (
+    MONO_THEME, appearance_choices, appearance_label, resolve_ui_prefs,
+    semantic_attr, set_colors_enabled,
+)
 
 # Screen constants
-HOME_ST, HELP_ST = 0, 1
-SCREENS = ['HOME', 'HELP']
+HOME_ST, HELP_ST, THEMES_ST = 0, 1, 2
+SCREENS = ['HOME', 'HELP', 'THEMES']
 
 # Install options offered by the inline install prompt: (key, label, am flags).
 # The persisted `install_opts` is the "last used" choice that '*' and 'y' refer
@@ -247,8 +250,8 @@ class HomeScreen(VappmanScreen):
 
                 status = "installed" if app.in_system_mode or 'U' in where else "uninstalled"
                 # Colour is decoration: installed rows are also marked by ✔/🔒
-                # and the S/U flags, so INFO only reinforces them.
-                attr = semantic_attr(Theme.INFO) if status == 'installed' else None
+                # and the S/U flags, so HOTSWAP only reinforces them.
+                attr = semantic_attr(Theme.HOTSWAP) if status == 'installed' else None
                 win.add_body(line, attr=attr, context=Context(status, info=ns))
 
                 if picked(idx):
@@ -475,6 +478,10 @@ class HomeScreen(VappmanScreen):
             return app.run_appman('--user')
         return app.run_appman('--system')
 
+    def theme_screen_ACTION(self):
+        """'T' opens the theme picker; ESC there returns to the report."""
+        self.app.ss.push(THEMES_ST, self.app.win.pick_pos)
+
 
 class VappmanHelpScreen(BasicHelpScreen):
     """Help screen with vappman-specific additions"""
@@ -489,12 +496,40 @@ class VappmanHelpScreen(BasicHelpScreen):
         app = self.app
         app.ss.pop()
 
+    def theme_screen_ACTION(self):
+        """'T' opens the theme picker; ESC there returns to Help."""
+        self.app.ss.push(THEMES_ST, self.app.win.pick_pos)
+
+
+# console-window's generic picker draws the swatches and the hint line; only
+# the cycle is overridden so vappman's 'mono' pseudo-theme is part of the
+# rotation and the process-wide colour switch follows it.  Keeping the generic
+# draw means the preview is console-window's role set, not a vappman copy.
+_ThemePickerScreen = Theme.create_picker_screen(
+    VappmanScreen,
+    cycle_key='t',
+    note='The last entry, mono, uses no colour at all. '
+         'The choice is remembered for the next run.',
+)
+
+
+class VappmanThemeScreen(_ThemePickerScreen):
+    """Theme picker over console-window's themes plus vappman's 'mono'."""
+
+    def spin_theme_ACTION(self):
+        """'t' advances to the next appearance (mono included) and persists it."""
+        self.app.cycle_appearance()
+
+    def escape_theme_ACTION(self):
+        """ESC returns to whichever screen opened the picker."""
+        self.app.ss.pop()
+
 
 class Vappman(Prerequisites):
     """ Main class for curses atop appman"""
     singleton = None
 
-    def __init__(self):
+    def __init__(self, cli_theme=None, no_color=False):
         # self.cmd_loop = CmdLoop(db=False) # just running as command
         super().__init__()
         assert not Vappman.singleton
@@ -504,7 +539,15 @@ class Vappman(Prerequisites):
         print(f'{self.has_am=}')
         print(f'{self.has_appman=}')
         self.disk_state = PersistentState('vappman',
-                      max_backups=1, install_opts='', database='am')
+                      max_backups=1, install_opts='', database='am',
+                      theme='', colors=True)
+        # Resolve the starting appearance before the window exists: the CLI
+        # flag/environment beat the remembered choice, and the window is created
+        # already on the chosen theme so the first frame is not wrong.
+        self.appearance_theme, self.appearance_colors = resolve_ui_prefs(
+            cli_theme, no_color,
+            self.disk_state.theme, self.disk_state.colors)
+        set_colors_enabled(self.appearance_colors)
         self.appman = AppmanVars()
         self.launcher = AppmanLauncher(self.appman)
 
@@ -549,13 +592,19 @@ class Vappman(Prerequisites):
         win_opts.dialog_abort = True
         win_opts.ctrl_c_terminates = False
         win_opts.min_cols_rows = (60, 10)
+        win_opts.theme = self.appearance_theme or 'default'
 
         self.win = ConsoleWindow(win_opts)
+        if not self.appearance_colors:
+            # 'mono' is not a library theme; record it on the window for the
+            # picker's header while the installed palette stays at the default.
+            self.win.theme = MONO_THEME
 
         # Initialize screens and screen stack
         self.screens = {
             HOME_ST: HomeScreen(self),
             HELP_ST: VappmanHelpScreen(self),
+            THEMES_ST: VappmanThemeScreen(self),
         }
         self.ss = ScreenStack(self.win, None, SCREENS, self.screens)
 
@@ -598,6 +647,13 @@ class Vappman(Prerequisites):
         spin.add_key('update', 'u - update_installed app', genre='action')
         spin.add_key('overwrite', 'o - overwrite app from its backup', genre='action')
         spin.add_key('test', 't - test (open a terminal and run app', genre='action')
+        # 'T' opens the picker from Home/Help; inside it 't' cycles, so the
+        # picker's own hint line is true and 't' on an installed row still
+        # means "test".
+        spin.add_key('theme_screen', 'T - theme picker', genre='action', keys='T')
+        spin.add_key('spin_theme', 't - cycle theme', genre='action', keys='t')
+        spin.add_key('escape_theme', 'ESC - leave theme picker', genre='action',
+                      keys=27, scope=THEMES_ST)
         spin.add_key('escape_help', 'ESC - leave help (return to prior screen)',
                       genre='action', keys=27, scope=HELP_ST)
         self.win.set_handled_keys(self.spin)
@@ -963,12 +1019,48 @@ class Vappman(Prerequisites):
     def get_keys_line(self):
         """ Build header line with fancy formatting markup (static actions only) """
         # Static actions with markup for fancy headers
-        line = f'[s]ync [c]lean [U]pd [R]eInst [q]uit ?:help  [d]b={self.opts.database}'
+        line = (f'[s]ync [c]lean [U]pd [R]eInst [T]heme [q]uit ?:help'
+                f'  [d]b={self.opts.database}')
         # Add search bar display string
         line += self.search_bar.get_display_string(prefix=' /')
         line += '  '
         return line
 
+    def appearance_choices(self):
+        """Every appearance the picker cycles, in order."""
+        return appearance_choices()
+
+    def appearance_label(self):
+        """The appearance the picker should show as current."""
+        return appearance_label(self.appearance_theme, self.appearance_colors)
+
+    def apply_appearance(self, name):
+        """Make *name* live ('mono' turns colour off) and remember it.
+
+        The preference is written immediately so an early exit cannot lose it,
+        and the window is told so its own ``theme`` (which the generic picker
+        reads for the header) matches the colour table that was installed.
+        """
+        mono = name == MONO_THEME
+        self.appearance_colors = not mono
+        # '' is the library default; keep the saved file canonical.
+        self.appearance_theme = '' if mono or name == 'default' else name
+        set_colors_enabled(not mono)
+        self.win.set_theme('default' if mono else name)
+        if mono:
+            # 'mono' is not a library theme: record it for the picker's header
+            # while the installed palette stays at the library default.
+            self.win.theme = MONO_THEME
+        self.disk_state.theme = self.appearance_theme
+        self.disk_state.colors = self.appearance_colors
+        self.disk_state.save()
+
+    def cycle_appearance(self):
+        """Advance the picker by one appearance (mono is the last entry)."""
+        choices = self.appearance_choices()
+        current = self.appearance_label()
+        idx = choices.index(current) if current in choices else -1
+        self.apply_appearance(choices[(idx + 1) % len(choices)])
 
     def _build_appman_cmd(self, subcommand: str, info: SimpleNamespace = None):
         """Build the appman/am argv for one command (pure, easy to test)."""
@@ -1053,6 +1145,11 @@ def main():
     parser.add_argument('--prereq', '--prerequisites',
         action='store_true', dest='prereq_only',
         help='Check and install prerequisites only, then exit')
+    parser.add_argument('--theme', default=None, metavar='NAME',
+        help='starting colour theme; "mono" disables colour '
+             '(the T picker remembers the choice)')
+    parser.add_argument('--no-color', action='store_true', dest='no_color',
+        help='disable colour (the same as --theme mono)')
 
     args = parser.parse_args()
 
@@ -1100,7 +1197,7 @@ def main():
         print()
 
     try:
-        appman = Vappman()
+        appman = Vappman(cli_theme=args.theme, no_color=args.no_color)
         appman.main_loop()
     except KeyboardInterrupt:
         pass

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Semantic colour roles for vappman.
+"""Semantic colour roles and the appearance preferences for vappman.
 
 Colour is decoration, never information.  Every role degrades to an attribute
 (or to plain text) when the terminal has no colour, so the installed markers
@@ -9,16 +9,22 @@ readable on a monochrome terminal.
 
 The role ids are ``console_window.Theme``'s semantic pairs rather than literal
 colour numbers.  console-window installs those pairs at startup and re-installs
-them whenever a theme is applied, so a future theme picker only has to change
-the active theme -- no rendering code in vappman needs to know the palette.
+them whenever a theme is applied, so changing the active theme recolours the
+whole UI without an edit to any draw code.
 
-Phase 1 (this module) has no theme picker, no CLI flag and no preference file.
-Those are deliberately deferred; see README-DEV.md, FUTURE ENHANCEMENTS.
+``mono`` is vappman's own no-colour pseudo-theme: console-window's
+``dark-mono``/``light-mono`` are still colour themes, so the true monochrome
+appearance lives here as the :data:`MONO_ROLES` mapping.  It is part of the
+picker's rotation but is not a library theme.
 """
 
+import os
 import curses
 
 from console_window import Theme
+
+# vappman's pseudo-theme: no colour at all, only attributes.
+MONO_THEME = 'mono'
 
 # Role -> attribute used when colour is off.  The hierarchy is preserved with
 # emphasis instead of hue: destructive prompts are bold+reverse, informational
@@ -34,8 +40,8 @@ MONO_ROLES = {
     Theme.OLD_SUCCESS: curses.A_NORMAL,
 }
 
-# Process-wide switch, seeded by a future --no-color / NO_COLOR.  One terminal,
-# so one decision.
+# Process-wide switch, seeded at startup by --no-color / NO_COLOR / mono.  One
+# terminal, so one decision.
 _COLORS_ENABLED = True
 
 
@@ -67,3 +73,46 @@ def semantic_attr(pair_id):
         return curses.color_pair(pair_id)
     except curses.error:
         return 0
+
+
+def appearance_choices():
+    """Every appearance the picker cycles, in order.
+
+    console-window's themes come first (in ``Theme.THEMES`` order), then
+    vappman's no-colour pseudo-theme, so one cycle always reaches ``mono``.
+    """
+    return list(Theme.list_all()) + [MONO_THEME]
+
+
+def appearance_label(theme, colors):
+    """The name to show for the live appearance."""
+    if not colors:
+        return MONO_THEME
+    return theme or 'default'
+
+
+def resolve_ui_prefs(cli_theme=None, no_color=False, saved_theme='',
+                     saved_colors=True, environ=None):
+    """Starting ``(theme, colors)`` from the flag, the environment and the prefs.
+
+    Precedence, highest first: an explicit ``--theme`` / ``--no-color``, the
+    ``NO_COLOR`` convention (any non-empty value disables colour), then the
+    remembered choice.  An explicit ``--theme`` is a statement of intent, so it
+    re-enables colour even when the saved choice was ``mono`` (unless
+    ``--no-color`` says otherwise); an unknown theme name falls back to
+    console-window's ``default``.
+
+    ``theme`` is ``''`` for the library default.  The special value ``mono``
+    forces ``colors`` off and is reported as ``theme=''``: there is no library
+    theme to install, because mono is the attribute mapping in this module.
+    """
+    env = os.environ if environ is None else environ
+    if cli_theme:
+        if cli_theme == MONO_THEME:
+            return '', False
+        return Theme.resolve(cli_theme), not no_color
+    theme = '' if saved_theme in (None, MONO_THEME) else Theme.resolve(saved_theme)
+    colors = bool(saved_colors) and saved_theme != MONO_THEME
+    if env.get('NO_COLOR') or no_color:
+        colors = False
+    return theme, colors

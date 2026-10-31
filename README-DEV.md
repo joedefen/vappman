@@ -9,7 +9,7 @@ the **test gate** and the **release gate** (`./bless`).
 | Path | Owns |
 | --- | --- |
 | [`vappman/__init__.py`](vappman/__init__.py) | `__version__`, and nothing else. The build backend reads it, `--version` prints it, `bless` reads the line without importing. |
-| [`vappman/Appearance.py`](vappman/Appearance.py) | Semantic colour roles: `console_window.Theme` pair ids, the mono attribute fallback, and the process-wide colour switch. |
+| [`vappman/Appearance.py`](vappman/Appearance.py) | Semantic colour roles: `console_window.Theme` pair ids, the `mono` attribute fallback, the process-wide colour switch, and `resolve_ui_prefs()` (flag/environment/saved precedence). |
 | [`pyproject.toml`](pyproject.toml) | Name, description, keywords, `requires-python`, runtime dependencies, the SPDX `license` and `license-files`, the `dev` extra, pytest and ruff configuration. |
 | [`bless`](bless) | The release gate. Copied verbatim from `pwr-tray`; it holds no copy of this project's identity. |
 | [`tests/inspect_dist.py`](tests/inspect_dist.py) | The distribution inspector. `bless` refuses to upload a wheel and sdist it has not inspected with this file. |
@@ -39,7 +39,7 @@ interpreter:
     python -m compileall -q vappman tests
     python -m pytest -q --cov=vappman --cov-report=term-missing
 
-Today that is 54 tests at 30% coverage.  Coverage is *reported*, not enforced;
+Today that is 71 tests at 35% coverage.  Coverage is *reported*, not enforced;
 see FUTURE ENHANCEMENTS.
 
 The ruff selection is committed rather than inherited
@@ -136,6 +136,37 @@ Run it by hand on any built pair:
 `main` and `dev` must both exist and both track origin; `publish` leaves them at
 the tagged commit.  Everything else about the release is one of the stages above.
 
+## Colour and theme switching
+
+`T` opens the picker from Home or Help, `t` inside it advances the appearance,
+and the choice is remembered.  The decisions noted while planning it are
+settled as follows.
+
+* **Persistence.** `theme` and `colors` live in the same
+  [`PersistentState`](vappman/PersistentState.py) file as `install_opts`.
+  [`load()`](vappman/PersistentState.py:21) now merges a saved file over the
+  defaults instead of requiring an exact key set, so adding the two options did
+  not reset an existing user's `install_opts`, `database` or `max_backups`.
+  Missing keys keep their defaults, keys from a newer version are dropped, and
+  the merged file is written back.  Migration, unknown-key and type-mismatch
+  cases are covered in `tests/test_persistent_state.py`.
+* **Mono.** `mono` is vappman's pseudo-theme (not a console-window theme):
+  colour is switched off and every role uses the `MONO_ROLES` attributes in
+  [`Appearance.py`](vappman/Appearance.py).  It is the last entry in the
+  picker's rotation, so one cycle always reaches it and the next wraps to the
+  first library theme.
+* **Picker scope.** The screen is built with
+  `Theme.create_picker_screen`, so it previews every console-window role
+  instead of a vappman-specific table.  Only the cycle action and ESC handling
+  are vappman additions; the `mono` entry is named in the picker's note.
+* **Key.** `T` opens the picker from Home/Help; `t` cycles inside it.  `t` on
+  an installed row still means "test" because the two actions have disjoint
+  screen scopes.
+* **CLI/env.** `--theme NAME` and `--no-color`, with the `NO_COLOR`
+  convention, then the remembered choice; `resolve_ui_prefs()` in
+  [`Appearance.py`](vappman/Appearance.py) defines the precedence.  An explicit
+  `--theme` re-enables colour unless `--no-color` is also given.
+
 ## FUTURE ENHANCEMENTS
 
 Deferred work, in the order it is worth doing.  None of it is required for the
@@ -165,7 +196,7 @@ The gate is load-bearing and currently untested here.  Port, adapted:
 
 ### 3. Enforce a coverage floor
 
-`--cov` prints 29% and ignores it.  Add `[tool.coverage.run]` (source, omit) and
+`--cov` prints 35% and ignores it.  Add `[tool.coverage.run]` (source, omit) and
 `[tool.coverage.report] fail_under`, set just below the current number, and
 ratchet it as tests grow.  Without this the coverage gate is advisory.
 
@@ -193,29 +224,3 @@ fallback upstream in `pwr-tray` and re-copy the file -- the second keeps the
 upstream as a `[tool.bless]` exclude, or keep screenshots out of the tree the
 copy traverses.
 
-### 7. Theme switching (deferred by design)
-
-Phase 1 colours only two semantic roles, through `console_window.Theme` pair
-ids: installed rows use `INFO` and the inline install/remove confirmations use
-`DANGER`. No theme picker, CLI flag or preference is shipped yet. The role ids
-are the seam: adding a picker later should not touch the draw code.
-
-Decisions to settle first:
-
-* **Persistence.** [`PersistentState.load()`](vappman/PersistentState.py:33)
-  requires the key set to match exactly, so adding `theme`/`colors` to its
-  defaults would reset an existing `install_opts`, `database` and
-  `max_backups` on first run. Either keep appearance in a separate store
-  (adapting console-window's two-method `ThemeStore` protocol) or relax
-  `load()` to merge missing keys and add a migration test.
-* **Mono.** `dark-mono`/`light-mono` are still colour themes; a true no-colour
-  appearance needs the `MONO_ROLES` path already in
-  [`Appearance.py`](vappman/Appearance.py) plus a pseudo-entry in the picker.
-* **Picker scope.** console-window's generic picker previews every role;
-  vappman uses only `DANGER`/`INFO`. Decide whether to show the generic theme
-  swatches or a vappman-specific role table.
-* **Key.** `t` already means "test" on installed rows
-  ([`main.py`](vappman/main.py:596)). Pick `T`, or expose the picker only from
-  Help, and bind `spin_theme` explicitly so the hint line is true.
-* **CLI/env.** `--theme`, `--no-color` and `NO_COLOR` need a precedence rule:
-  explicit flag, then environment, then remembered preference.

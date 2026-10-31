@@ -19,7 +19,18 @@ class PersistentState:
         self.load()
 
     def load(self):
-        """Loads state from JSON, validating keys and types."""
+        """Loads state from JSON, merging it over the defaults.
+
+        A file written by an older version is missing keys the software has
+        since added, and one written by a newer version may carry keys this
+        version does not know.  Both are normal, not corruption: known keys are
+        honoured after a type check, unknown keys are dropped, and missing keys
+        keep their defaults.  The merged result is written back, so the next run
+        sees a complete file (a one-time, in-place migration).
+
+        Only unreadable JSON, a document that is not an object, or a type
+        mismatch for a known key still resets everything to the defaults.
+        """
         if not self._config_file.exists():
             self.save()
             return
@@ -28,23 +39,31 @@ class PersistentState:
             with open(self._config_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # Validation logic
-            # 1. Check if keys match identically
-            if set(data.keys()) != set(self._defaults.keys()):
-                raise ValueError("Key sets do not match.")
+            if not isinstance(data, dict):
+                raise ValueError("State file is not an object.")
 
-            # 2. Check if types match the defaults
+            # Start from the defaults so keys an older file did not have keep
+            # their value; validate only the keys this version actually knows.
+            merged = dict(self._defaults)
             for key, value in data.items():
+                if key not in self._defaults:
+                    continue  # a key from a newer version: drop it on save
                 if type(value) is not type(self._defaults[key]):
                     raise TypeError(f"Type mismatch for {key}.")
-
-            # If valid, update the object attributes
-            for key, value in data.items():
-                setattr(self, key, value)
+                merged[key] = value
 
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             print(f"Invalid state file ({e}). Reverting to defaults.")
             self._reset_to_defaults()
+            self.save()
+            return
+
+        for key, value in merged.items():
+            setattr(self, key, value)
+
+        # Persist the merge only when the file differed from it (old file
+        # missing keys, or a file with keys this version drops).
+        if merged != data:
             self.save()
 
     def _reset_to_defaults(self):

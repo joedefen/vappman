@@ -95,9 +95,13 @@ Run `vappman` from the command line. You will see a screen similar to this:
 * `>` - Currently selected app
 
 Colour reinforces these symbols, never replaces them: installed rows are
-tinted with the `INFO` role and the inline install/remove prompts with
+tinted with the `HOTSWAP` role and the inline install/remove prompts with
 `DANGER`. On a terminal without colour the roles fall back to bold/reverse
 attributes, so every state remains readable.
+
+Press `T` to open the theme picker; `t` there cycles through the available
+themes and `mono` (no colour at all). The choice is remembered for the next
+run. `--theme NAME` and `--no-color` override it for a single run.
 
 #### Global Keys (Top Line)
 
@@ -114,6 +118,7 @@ attributes, so every state remains readable.
 * `_` - Toggle fancy header mode (Underline/Reverse/Off)
 * `*` - Toggle demo mode
 * `#` - Change number of backups to keep (2, 1, or -1 for infinite)
+* `T` - Open the colour-theme picker (`t` cycles there; `mono` disables colour)
 
 #### Navigation Keys
 
