@@ -26,7 +26,7 @@ import curses as cs
 from console_window import (
     ConsoleWindow, OptionSpinner, ConsoleWindowOpts,
     Screen, ScreenStack, BasicHelpScreen, Context,
-    IncrementalSearchBar, InlineConfirmation
+    IncrementalSearchBar, InlineConfirmation, Theme
 )
 from . import __version__
 from .PersistentState import PersistentState
@@ -35,6 +35,7 @@ from .AppmanLauncher import AppmanLauncher
 from .Prerequisites import Prerequisites
 from .VappmanListCache import AppCacheManager
 from . import AppimageDoctor
+from .Appearance import semantic_attr
 
 # Screen constants
 HOME_ST, HELP_ST = 0, 1
@@ -245,7 +246,10 @@ class HomeScreen(VappmanScreen):
                     line += ns.synopsis
 
                 status = "installed" if app.in_system_mode or 'U' in where else "uninstalled"
-                win.add_body(line, context=Context(status, info=ns))
+                # Colour is decoration: installed rows are also marked by ✔/🔒
+                # and the S/U flags, so INFO only reinforces them.
+                attr = semantic_attr(Theme.INFO) if status == 'installed' else None
+                win.add_body(line, attr=attr, context=Context(status, info=ns))
 
                 if picked(idx):
                     selected_key = (appname, db)
@@ -261,7 +265,7 @@ class HomeScreen(VappmanScreen):
                             # reserves the row even when the pick sits at the
                             # viewport bottom.
                             win.add_body(
-                                prompt, attr=cs.A_BOLD,
+                                prompt, attr=cs.A_BOLD | semantic_attr(Theme.DANGER),
                                 context=Context("TRANSIENT", pickable=False))
                 idx += 1
 
@@ -299,7 +303,7 @@ class HomeScreen(VappmanScreen):
                         # counted, and the prompt could fall off-screen.
                         win.add_body(
                             f'    ⚠️  Install {appname}?',
-                            attr=cs.A_BOLD,
+                            attr=cs.A_BOLD | semantic_attr(Theme.DANGER),
                             context=Context("TRANSIENT", pickable=False))
                         win.add_body(
                             '    ' + install_options_legend(app.opts.install_opts),

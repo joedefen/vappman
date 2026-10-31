@@ -94,6 +94,11 @@ Run `vappman` from the command line. You will see a screen similar to this:
 * `﹫` - Database indicator (in multi-database view)
 * `>` - Currently selected app
 
+Colour reinforces these symbols, never replaces them: installed rows are
+tinted with the `INFO` role and the inline install/remove prompts with
+`DANGER`. On a terminal without colour the roles fall back to bold/reverse
+attributes, so every state remains readable.
+
 #### Global Keys (Top Line)
 
 * `m` - Switch mode if using `am`, toggling between SYSTEM and USER mode

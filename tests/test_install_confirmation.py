@@ -6,6 +6,7 @@ options menu (n/s/c/b, or y for the last choice) on the header line; remove
 keeps the plain y/ESC prompt.  The eventual appman/am command carries ``-y`` so
 AM does not ask a second time.
 """
+import curses
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -13,8 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from types import SimpleNamespace
 
 from console_window import (
-    ConsoleWindow, ConsoleWindowOpts, InlineConfirmation)
+    ConsoleWindow, ConsoleWindowOpts, InlineConfirmation, Theme)
 from console_window.backend import HeadlessBackend
+import vappman.main as main_module
 from vappman.main import HomeScreen, Vappman, install_options_legend
 
 
@@ -349,16 +351,17 @@ def _drawn_screen(installed, action, install_opts='sandbox'):
     texts = list(win.body.texts)
     genres = [getattr(ctx, 'genre', None) for ctx in win.body.contexts]
     headers = list(win.head.texts)
+    attrs = [list(runs) for runs in win.body.text_attrs]
     # Abut range of the pick: the engine keeps this range in the viewport, so
     # the prompt rows must be inside it or they can fall off-screen.
     abut = win._abut_range_at(win.pick_pos)
     pickable = [win._is_pickable(i) for i in range(win.body.row_cnt)]
     win.stop_curses()
-    return texts, genres, headers, abut, pickable
+    return texts, genres, headers, abut, pickable, attrs
 
 
 def test_install_prompt_sits_below_the_entry_rows():
-    texts, genres, headers, abut, pickable = _drawn_screen(False, 'install')
+    texts, genres, headers, abut, pickable, _ = _drawn_screen(False, 'install')
 
     assert texts[0].startswith('   ◆ blink') and 'A tiny browser' in texts[0]
     assert texts[1] == '    ⚠️  Install blink?'
@@ -371,7 +374,7 @@ def test_install_prompt_sits_below_the_entry_rows():
 
 
 def test_remove_prompt_sits_below_the_detail_rows():
-    texts, genres, headers, abut, pickable = _drawn_screen(True, 'remove')
+    texts, genres, headers, abut, pickable, _ = _drawn_screen(True, 'remove')
 
     assert texts[0].startswith(' ✔─U blink') and 'A tiny browser' in texts[0]
     assert '1.0 AppImage' in texts[1]
@@ -386,8 +389,58 @@ def test_installed_action_prompts_use_their_own_label():
     for action, label in (('backup', 'Backup'), ('sandbox', 'Sandbox'),
                           ('unsandbox', 'Unsandbox'),
                           ('icons', 'Set icons for')):
-        texts, genres, headers, abut, pickable = _drawn_screen(True, action)
+        texts, genres, headers, abut, pickable, _ = _drawn_screen(True, action)
         assert texts[2] == f'    ⚠️  {label} blink? Press y or ESC', action
         assert genres[2] == 'TRANSIENT'
         assert pickable[2] is False
         assert abut == (0, 2)
+
+
+# --- semantic colour roles --------------------------------------------------
+# The draw code must ask for the right role and nothing more.  Monkeypatching
+# semantic_attr keeps the assertions independent of the terminal's palette.
+
+INFO_SENTINEL = 0x4000
+DANGER_SENTINEL = 0x8000
+
+
+def _sentinel_attr(pair_id):
+    return {Theme.INFO: INFO_SENTINEL,
+            Theme.DANGER: DANGER_SENTINEL}.get(pair_id, 0)
+
+
+def _run_attrs(attr_runs):
+    return [attr for attr, _ in attr_runs]
+
+
+def test_installed_row_uses_the_info_role(monkeypatch):
+    monkeypatch.setattr(main_module, 'semantic_attr', _sentinel_attr)
+
+    *_, attrs = _drawn_screen(True, 'remove')
+
+    assert INFO_SENTINEL in _run_attrs(attrs[0])
+    assert DANGER_SENTINEL not in _run_attrs(attrs[0])
+
+
+def test_uninstalled_row_does_not_use_the_info_role(monkeypatch):
+    monkeypatch.setattr(main_module, 'semantic_attr', _sentinel_attr)
+
+    *_, attrs = _drawn_screen(False, 'install')
+
+    assert INFO_SENTINEL not in _run_attrs(attrs[0])
+
+
+def test_install_prompt_uses_the_danger_role(monkeypatch):
+    monkeypatch.setattr(main_module, 'semantic_attr', _sentinel_attr)
+
+    *_, attrs = _drawn_screen(False, 'install')
+
+    assert _run_attrs(attrs[1]) == [curses.A_BOLD | DANGER_SENTINEL]
+
+
+def test_installed_action_prompt_uses_the_danger_role(monkeypatch):
+    monkeypatch.setattr(main_module, 'semantic_attr', _sentinel_attr)
+
+    *_, attrs = _drawn_screen(True, 'remove')
+
+    assert _run_attrs(attrs[2]) == [curses.A_BOLD | DANGER_SENTINEL]
