@@ -36,8 +36,8 @@ from .Prerequisites import Prerequisites
 from .VappmanListCache import AppCacheManager
 from . import AppimageDoctor
 from .Appearance import (
-    MONO_THEME, appearance_choices, appearance_label, resolve_ui_prefs,
-    semantic_attr, set_colors_enabled,
+    MONO_THEME, appearance_choices, appearance_label, colors_enabled,
+    resolve_ui_prefs, semantic_attr, set_colors_enabled,
 )
 
 # Screen constants
@@ -501,20 +501,38 @@ class VappmanHelpScreen(BasicHelpScreen):
         self.app.ss.push(THEMES_ST, self.app.win.pick_pos)
 
 
-# console-window's generic picker draws the swatches and the hint line; only
-# the cycle is overridden so vappman's 'mono' pseudo-theme is part of the
-# rotation and the process-wide colour switch follows it.  Keeping the generic
-# draw means the preview is console-window's role set, not a vappman copy.
+# Key that cycles the appearance; the picker's hint line advertises it.
+THEME_CYCLE_KEY = 't'
+
+# One dim line under the swatches.  It must not explain mono: a picker entry
+# named 'mono' with a monochrome preview explains itself, and the sentence
+# showed under every colour theme as well.
+THEME_PICKER_NOTE = 'The choice is remembered for the next run.'
+
+# console-window paints the swatches through its appearance layer, so they
+# follow the same process-wide colour switch vappman flips for 'mono': with
+# colour off the picker shows the monochrome role hierarchy instead of the
+# previous palette.  Only the cycle and the header label are vappman's.
 _ThemePickerScreen = Theme.create_picker_screen(
     VappmanScreen,
-    cycle_key='t',
-    note='The last entry, mono, uses no colour at all. '
-         'The choice is remembered for the next run.',
+    cycle_key=THEME_CYCLE_KEY,
+    note=THEME_PICKER_NOTE,
 )
 
 
 class VappmanThemeScreen(_ThemePickerScreen):
     """Theme picker over console-window's themes plus vappman's 'mono'."""
+
+    def theme_label(self, theme_name):
+        """Name 'mono' while colour is off, so header and swatches agree.
+
+        With colour on the generic label names the installed palette.  With
+        colour off the swatches are drawn from the monochrome role attributes,
+        so naming the palette left underneath would tell a different story.
+        """
+        if not colors_enabled():
+            return MONO_THEME
+        return super().theme_label(theme_name)
 
     def spin_theme_ACTION(self):
         """'t' advances to the next appearance (mono included) and persists it."""
@@ -596,8 +614,8 @@ class Vappman(Prerequisites):
 
         self.win = ConsoleWindow(win_opts)
         if not self.appearance_colors:
-            # 'mono' is not a library theme; record it on the window for the
-            # picker's header while the installed palette stays at the default.
+            # 'mono' is not a library theme: the installed palette stays at the
+            # default, but the window names the appearance actually in effect.
             self.win.theme = MONO_THEME
 
         # Initialize screens and screen stack
@@ -1038,8 +1056,9 @@ class Vappman(Prerequisites):
         """Make *name* live ('mono' turns colour off) and remember it.
 
         The preference is written immediately so an early exit cannot lose it,
-        and the window is told so its own ``theme`` (which the generic picker
-        reads for the header) matches the colour table that was installed.
+        and the window is told which palette was installed; ``mono`` keeps its
+        own name there so a reader of ``win.theme`` sees the no-colour
+        appearance rather than the default palette left underneath.
         """
         mono = name == MONO_THEME
         self.appearance_colors = not mono
@@ -1048,8 +1067,8 @@ class Vappman(Prerequisites):
         set_colors_enabled(not mono)
         self.win.set_theme('default' if mono else name)
         if mono:
-            # 'mono' is not a library theme: record it for the picker's header
-            # while the installed palette stays at the library default.
+            # 'mono' is not a library theme: the installed palette stays at the
+            # library default, but the window names the appearance in effect.
             self.win.theme = MONO_THEME
         self.disk_state.theme = self.appearance_theme
         self.disk_state.colors = self.appearance_colors

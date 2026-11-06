@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Semantic colour roles and the appearance preferences for vappman.
+"""The appearance preferences for vappman.
 
 Colour is decoration, never information.  Every role degrades to an attribute
 (or to plain text) when the terminal has no colour, so the installed markers
@@ -12,68 +12,34 @@ colour numbers.  console-window installs those pairs at startup and re-installs
 them whenever a theme is applied, so changing the active theme recolours the
 whole UI without an edit to any draw code.
 
+The role-to-attribute mapping, the process-wide switch and the forgiving lookup
+live in :mod:`console_window.appearance`, and are re-exported here.  Keeping one
+switch matters: the library's theme picker paints its swatches through that
+layer, so a vappman-local copy would leave the picker in colour while the rest
+of the UI went mono.
+
 ``mono`` is vappman's own no-colour pseudo-theme: console-window's
 ``dark-mono``/``light-mono`` are still colour themes, so the true monochrome
-appearance lives here as the :data:`MONO_ROLES` mapping.  It is part of the
+appearance is "colour off" rather than a library theme.  It is part of the
 picker's rotation but is not a library theme.
 """
 
 import os
-import curses
 
 from console_window import Theme
+from console_window.appearance import (
+    MONO_ROLES, colors_enabled, semantic_attr, set_colors_enabled,
+)
+
+# Explicit re-exports: the appearance API is read from this module by vappman.
+__all__ = [
+    'MONO_ROLES', 'MONO_THEME', 'appearance_choices', 'appearance_label',
+    'colors_enabled', 'resolve_ui_prefs', 'semantic_attr',
+    'set_colors_enabled',
+]
 
 # vappman's pseudo-theme: no colour at all, only attributes.
 MONO_THEME = 'mono'
-
-# Role -> attribute used when colour is off.  The hierarchy is preserved with
-# emphasis instead of hue: destructive prompts are bold+reverse, informational
-# rows carry nothing (their ✔/🔒 and S/U markers already distinguish them).
-MONO_ROLES = {
-    Theme.DANGER: curses.A_BOLD | curses.A_REVERSE,
-    Theme.ERROR: curses.A_BOLD | curses.A_REVERSE,
-    Theme.WARNING: curses.A_BOLD,
-    Theme.SUCCESS: curses.A_BOLD,
-    Theme.EMPHASIS: curses.A_BOLD,
-    Theme.INFO: curses.A_NORMAL,
-    Theme.PROGRESS: curses.A_NORMAL,
-    Theme.OLD_SUCCESS: curses.A_NORMAL,
-    Theme.HOTSWAP: curses.A_NORMAL,
-}
-
-# Process-wide switch, seeded at startup by --no-color / NO_COLOR / mono.  One
-# terminal, so one decision.
-_COLORS_ENABLED = True
-
-
-def set_colors_enabled(enabled):
-    """Turn semantic colour on or off for the whole process."""
-    global _COLORS_ENABLED  # pylint: disable=global-statement
-    _COLORS_ENABLED = bool(enabled)
-
-
-def colors_enabled():
-    """True while semantic roles resolve to colour pairs rather than attributes."""
-    return _COLORS_ENABLED
-
-
-def semantic_attr(pair_id):
-    """Attribute for a console-window ``Theme`` role, or plain when no colour.
-
-    With colour off the role becomes an attribute from :data:`MONO_ROLES`, so
-    the UI keeps its emphasis hierarchy on a monochrome terminal.  Otherwise
-    both ``curses.has_colors()`` and ``curses.color_pair()`` can raise
-    ``curses.error`` before ``initscr()`` (and a failed lookup must never abort
-    a redraw), so any failure degrades to plain text.
-    """
-    if not _COLORS_ENABLED:
-        return MONO_ROLES.get(pair_id, curses.A_NORMAL)
-    try:
-        if not curses.has_colors():
-            return 0
-        return curses.color_pair(pair_id)
-    except curses.error:
-        return 0
 
 
 def appearance_choices():

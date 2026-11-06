@@ -212,8 +212,12 @@ settled as follows.
   first library theme.
 * **Picker scope.** The screen is built with
   `Theme.create_picker_screen`, so it previews every console-window role
-  instead of a vappman-specific table.  Only the cycle action and ESC handling
-  are vappman additions; the `mono` entry is named in the picker's note.
+  instead of a vappman-specific table.  Since console-window 2.2.2 the swatches
+  are painted through the shared appearance layer, so they follow the same
+  process-wide colour switch as the rest of the UI: with colour off the picker
+  shows the monochrome attribute hierarchy rather than the previous palette.
+  vappman adds the cycle action, ESC handling and a `theme_label` override that
+  names `mono` while colour is off; no note line explains the entry.
 * **Key.** `T` opens the picker from Home/Help; `t` cycles inside it.  `t` on
   an installed row still means "test" because the two actions have disjoint
   screen scopes.

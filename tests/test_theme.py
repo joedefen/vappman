@@ -7,7 +7,8 @@ import pytest
 from console_window import Theme
 from vappman import Appearance
 from vappman.main import (
-    THEMES_ST, HomeScreen, Vappman, VappmanHelpScreen, VappmanThemeScreen)
+    THEME_PICKER_NOTE, THEMES_ST, HomeScreen, Vappman,
+    VappmanHelpScreen, VappmanThemeScreen)
 
 
 @pytest.fixture(autouse=True)
@@ -169,3 +170,62 @@ def test_picker_cycles_the_app_and_escape_pops():
     screen.escape_theme_ACTION()
 
     assert events == ['cycle', 'pop']
+
+
+# --- the picker's own drawing ----------------------------------------------
+
+# The role order the library's picker draws, for attribute comparisons.
+PICKER_ROLE_ORDER = (
+    Theme.DANGER, Theme.SUCCESS, Theme.OLD_SUCCESS, Theme.WARNING,
+    Theme.INFO, Theme.EMPHASIS, Theme.ERROR, Theme.PROGRESS, Theme.HOTSWAP,
+)
+
+
+class _RecordingWindow:
+    """Captures the header/body calls so the mono preview can be inspected."""
+
+    def __init__(self, theme='mono'):
+        self.theme = theme
+        self.headers = []
+        self.bodies = []
+
+    def set_pick_mode(self, on=True, pick_size=1):
+        """The picker always leaves pick mode before drawing."""
+
+    def add_header(self, text, attr=None, resume=False, **kwargs):
+        """Record a header line."""
+        self.headers.append(text)
+
+    def add_body(self, text, attr=None, resume=False, **kwargs):
+        """Record a body line with the attribute it was drawn with."""
+        self.bodies.append((text, attr))
+
+
+def test_picker_note_does_not_explain_the_mono_entry():
+    # The note is under every theme; naming mono there confused every screen.
+    assert 'mono' not in THEME_PICKER_NOTE.lower()
+
+
+def test_mono_picker_is_named_mono_and_previews_without_colour():
+    # The window still reports the palette underneath; the label and the
+    # swatches must follow the switch, not that leftover name.
+    win = _RecordingWindow(theme='nord')
+    app = SimpleNamespace(win=win)
+    Appearance.set_colors_enabled(False)
+
+    VappmanThemeScreen(app).draw_screen()
+
+    assert Appearance.MONO_THEME in win.headers[0]
+    rows = win.bodies[:-1]
+    assert [attr for _, attr in rows] == [
+        Appearance.MONO_ROLES[role] for role in PICKER_ROLE_ORDER]
+    assert win.bodies[-1][0] == THEME_PICKER_NOTE
+
+
+def test_colour_picker_names_the_installed_theme():
+    win = _RecordingWindow(theme='nord')
+    app = SimpleNamespace(win=win)
+
+    VappmanThemeScreen(app).draw_screen()
+
+    assert 'nord' in win.headers[0]
