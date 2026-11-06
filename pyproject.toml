@@ -61,6 +61,20 @@ dev = [
 testpaths = ["tests"]
 addopts = "-ra"
 
+[tool.coverage.run]
+source = ["vappman"]
+
+[tool.coverage.report]
+# Set just below the measured number when the shared gate was adopted.  Raise
+# it as the suite grows; never lower it to make a commit pass.
+fail_under = 35
+
+[tool.bless]
+# The default is the pair, written out here so the branch model is visible
+# where the rest of this project's identity lives.  `publish` aligns `dev`
+# with `main` before tagging, and pushes both.
+branches = ["main", "dev"]
+
 [tool.ruff]
 # Keep the lint gate identical on every machine: no global/user config can
 # change which rules the gate enforces.  The selection below is deliberately

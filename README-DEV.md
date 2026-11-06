@@ -10,9 +10,11 @@ the **test gate** and the **release gate** (`./bless`).
 | --- | --- |
 | [`vappman/__init__.py`](vappman/__init__.py) | `__version__`, and nothing else. The build backend reads it, `--version` prints it, `bless` reads the line without importing. |
 | [`vappman/Appearance.py`](vappman/Appearance.py) | Semantic colour roles: `console_window.Theme` pair ids, the `mono` attribute fallback, the process-wide colour switch, and `resolve_ui_prefs()` (flag/environment/saved precedence). |
-| [`pyproject.toml`](pyproject.toml) | Name, description, keywords, `requires-python`, runtime dependencies, the SPDX `license` and `license-files`, the `dev` extra, pytest and ruff configuration. |
-| [`bless`](bless) | The release gate. Copied verbatim from `pwr-tray`; it holds no copy of this project's identity. |
+| [`pyproject.toml`](pyproject.toml) | Name, description, keywords, `requires-python`, runtime dependencies, the SPDX `license` and `license-files`, the `dev` extra, the pytest, coverage and ruff configuration, and the `[tool.bless]` branch model. |
+| [`bless`](bless) | The release gate, emitted byte for byte from `~/Projects/blessd/bless` by that repo's `build.py`. It holds no copy of this project's identity, and it is never edited here. |
+| `~/Projects/blessd/docs/release-strategy.md` | The release strategy every project shares: the branch model, the stages, the rehearsal, the credentials. This file documents only what is particular to vappman. |
 | [`tests/inspect_dist.py`](tests/inspect_dist.py) | The distribution inspector. `bless` refuses to upload a wheel and sdist it has not inspected with this file. |
+| [`runner`](runner) | Runs the tree from source (`python -m vappman.main`) for debugging. |
 | [`.github/workflows/tests.yml`](.github/workflows/tests.yml) | CI: installs `.[test]` and runs `pytest` on Python 3.10 -- 3.13. |
 | [`.gitignore`](.gitignore) | Keeps gate artifacts (`build/`, `dist/`, `.coverage`, caches) out of `git status`, because the gate refuses a dirty tree. |
 
@@ -20,10 +22,12 @@ The version lives in exactly one place.  `pyproject.toml` declares
 `dynamic = ["version"]`, so flit reads `vappman/__init__.py`; a
 `X.Y.Z.99.N` rehearsal rewrites that line only inside a throwaway copy.
 
-No `[tool.bless]` table is needed: everything is derived from what is already
-there -- `NAME = vappman`, `MODULE = vappman`, the console script from the first
-`[project.scripts]` entry (also `vappman`), and the inspector at
-`tests/inspect_dist.py`.
+Almost nothing needs a `[tool.bless]` table: `NAME = vappman`,
+`MODULE = vappman`, the console script from the first `[project.scripts]`
+entry (also `vappman`), and the inspector at `tests/inspect_dist.py` are all
+derived from what is already there. The one setting written out is `branches`,
+which names the branches `publish` releases from -- see
+[the branch model](#the-branch-model-is-a-setting-not-a-convention) below.
 
 ## The test gate
 
@@ -39,8 +43,9 @@ interpreter:
     python -m compileall -q vappman tests
     python -m pytest -q --cov=vappman --cov-report=term-missing
 
-Today that is 71 tests at 35% coverage.  Coverage is *reported*, not enforced;
-see FUTURE ENHANCEMENTS.
+Today that is 78 tests at 36% coverage.  The floor (35%) is enforced through
+`[tool.coverage.report] fail_under`; raise it when the measured number rises,
+never lower it to make a commit pass.
 
 The ruff selection is committed rather than inherited
 (`[tool.ruff.lint] select = ["E4", "E7", "E9", "F"]`) so that no user or global
@@ -49,13 +54,19 @@ conservative core, not a style position.
 
 ## The release gate: `./bless`
 
-`./bless` takes no arguments and has no flag that skips a stage.  It always runs
-everything, then prints what it has in hand and asks one question:
+`./bless` takes no argument that skips a stage.  It always runs everything,
+then prints what it has in hand and asks one question:
 
     ====> Enter test or publish or quit:
 
 Only `test` and `publish` are accepted, spelled in full; anything else is asked
 again.  Enter, `quit` or Ctrl-C stops with nothing tagged, uploaded or pushed.
+
+The one other invocation, `./bless --branch-plan`, prints this tree's branch
+plan as JSON and exits without entering the gate at all: no index read, no
+gates, no build, no prompt and no network.  It is how `bt` asks what `publish`
+would do, and it exits 0 even when the answer is a refusal, because a refusal
+is data there rather than a failure.
 
 **Stages, in order**
 
@@ -70,9 +81,10 @@ again.  Enter, `quit` or Ctrl-C stops with nothing tagged, uploaded or pushed.
 6. **check** -- `twine check --strict` on both files.
 7. **smoke** -- installs the built wheel into a throwaway venv and runs
    `vappman --version`, which must print the version being released.  This is
-   why the CLI has `--version` ([`main()`](vappman/main.py:1036)).
-8. **branch plan** -- refuses a detached HEAD, a third branch, diverged
-   `main`/`dev`, or a push that would not fast-forward.
+   why the CLI has `--version` ([`main()`](vappman/main.py:1132)).
+8. **branch plan** -- refuses a detached HEAD, a branch that is not one of the
+   release branches, a release branch missing locally or on origin, two
+   branches that have diverged, or a push that would not fast-forward.
 
 **`test`** is the rehearsal and never spends the working version.  It copies the
 tree to `build/bless-test-<version>/src`, rewrites `__version__` to
@@ -105,6 +117,25 @@ command.  CI stays a gate.
 One interpreter caveat: `bless` imports `tomllib`, so it needs **Python 3.11+**
 to run, even though vappman itself supports 3.10.
 
+## The branch model is a setting, not a convention
+
+`bless` publishes only from a branch it was told about, and pushes every branch
+it was told about.  Which ones those are is `[tool.bless] branches` in
+[`pyproject.toml`](pyproject.toml), and there are two shapes:
+
+* `branches = ["main"]` -- one release branch.  Nothing is aligned, and
+  `publish` pushes `main` and the tag.
+* `branches = ["main", "dev"]` -- the pair this project uses.  Whichever of the
+  two lags is fast-forwarded onto the other before the tag, so a release always
+  leaves them at one commit; `main` alone satisfies the model while `dev` has
+  not been created yet.
+
+Either way the gate refuses a branch it was not told about, a branch it has to
+push that is missing on origin, two branches that have diverged, and a push that
+would not fast-forward.  What a single branch cannot do is notice that a
+development branch was left behind: merging `dev` into `main` stays your job,
+and the pair exists to make it the gate's job instead.
+
 ## What the inspector asserts
 
 [`tests/inspect_dist.py`](tests/inspect_dist.py) is the one implementation, used
@@ -133,8 +164,32 @@ Run it by hand on any built pair:
 3. Answer `test` to rehearse on TestPyPI, then run `./bless` again and answer
    `publish` -- or go straight to `publish`.
 
-`main` and `dev` must both exist and both track origin; `publish` leaves them at
-the tagged commit.  Everything else about the release is one of the stages above.
+`[tool.bless] branches` names what `publish` pushes.  Both `main` and `dev` must
+exist and track origin here, and `publish` leaves them at the tagged commit.
+Everything else about the release is one of the stages above, and the shared
+half lives in `~/Projects/blessd/docs/release-strategy.md`.
+
+## Notes on this adoption
+
+* This section is one run of `~/Projects/blessd/docs/adopting.md`, which is the
+  procedure written for whoever converts the next project.  If the two ever
+  disagree, that document is the procedure and this is the record of one run.
+* [`bless`](bless) is emitted, byte for byte, from
+  `~/Projects/blessd/bless` -- SHA-256
+  `3ef60e9e806ca58a3d900dd6622bb8be0052210da1ef26f9918bf0a1deb1e3b2` when this
+  was written.  It is not edited here: a change is made in `blessd` and
+  re-emitted with `python3 ~/Projects/blessd/build.py --into . --force`, which
+  replaces the file and prints the new hash.  Reuse used to be "copy verbatim"
+  by hand, and the copies drifted into three versions -- one of them unable to
+  release a project whose model is `branches = ["main"]`.
+* The gate's own policy tests stayed in `blessd`; this project keeps only
+  [`tests/test_bless.py`](tests/test_bless.py), which pins the identity the tree
+  derives from its `pyproject.toml` and the inspector its releases upload behind.
+* vappman already had the five things the gate asks for: one version location
+  (`dynamic = ["version"]`), an inspector, the `dev` extra with `build`,
+  `twine>=7` and `packaging>=26`, a console script that answers `--version`, and
+  a branch model -- the `main`/`dev` pair, written into `[tool.bless]` so it is
+  visible.  The conversion added the coverage floor and re-emitted the gate.
 
 ## Colour and theme switching
 
@@ -180,27 +235,20 @@ Add a job that installs `.[dev]`, runs `ruff check .` and `compileall`, then
 `python -m build`, `tests/inspect_dist.py` on the pair, and `twine check
 --strict` -- the same commands, not equivalents.  Keep it credential-free.
 
-### 2. Regression tests for the tooling itself
+### 2. Regression tests for this project's tooling
 
-The gate is load-bearing and currently untested here.  Port, adapted:
+The gate's own policy is tested once, in `blessd`, so nothing here should test
+it a second time.  What is still worth pinning locally is repository hygiene:
 
 * `test_repo_hygiene.py` -- the ruff configuration lives in the repository; CI
-  runs lint, tests and a packaging smoke test; a coverage floor is wired and
+  runs lint, tests and a packaging smoke test; the coverage floor is wired and
   cannot quietly disappear; `README`/`README-DEV` name the release gate; no
   documented command uploads a whole `dist/` directory.
-* `test_bless.py`-style tests -- import `bless` as a module and stub its
-  stages: identity derivation, preflight refusals, the duplicate check running
-  before any build, the prompt accepting only `test`/`publish`, the
-  `X.Y.Z.99.N` arithmetic, the patient verifier's lag handling.  These are what
-  keep a future re-copy of `bless` honest.
 
-### 3. Enforce a coverage floor
+[`tests/test_bless.py`](tests/test_bless.py) already covers the half that is
+vappman's own: the derived identity and the inspector.
 
-`--cov` prints 35% and ignores it.  Add `[tool.coverage.run]` (source, omit) and
-`[tool.coverage.report] fail_under`, set just below the current number, and
-ratchet it as tests grow.  Without this the coverage gate is advisory.
-
-### 4. Tighten the lint ratchet
+### 3. Tighten the lint ratchet
 
 `E4`/`E7`/`E9`/`F` is ruff's own default selection, so the committed config
 matches the tool rather than trimming it -- but it is a floor, not a target.  A
@@ -210,17 +258,16 @@ of them auto-fixable: mostly line length (38), import sorting (22) and
 curses/TUI code genuinely needs them, never by trimming the selection to make a
 commit pass.
 
-### 5. Decide how `bless` handles Python 3.10
+### 4. Decide how `bless` handles Python 3.10
 
 `bless` needs 3.11+ (`tomllib`), while the package supports 3.10 and CI tests
 it.  Either state and enforce the interpreter for releases, or add a `tomli`
-fallback upstream in `pwr-tray` and re-copy the file -- the second keeps the
-"copy verbatim, never edit" rule intact.
+fallback upstream in `blessd` and re-emit the gate -- the second keeps the
+"emit verbatim, never edit" rule intact.
 
-### 6. Trim what the rehearsal copies
+### 5. Trim what the rehearsal copies
 
 `COPY_EXCLUDES` in [`bless`](bless) does not know about `images/`, so every
 `test` run copies 18 MB of screenshots into `build/bless-test-*/src`.  Fix it
-upstream as a `[tool.bless]` exclude, or keep screenshots out of the tree the
-copy traverses.
+upstream in `blessd`, or keep screenshots out of the tree the copy traverses.
 
