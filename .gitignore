@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+.venv/
+__pycache__/
+.vscode/
+*.egg-info/
+*.tar.gz
+*.whl
+
+# Build and test artefacts.  `./bless` builds into build/bless-<ver>/ and the
+# test gate writes .coverage; leaving either untracked would make the next
+# bless preflight refuse a "dirty" tree.
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

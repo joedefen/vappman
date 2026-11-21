@@ -1,0 +1,35 @@
+[build-system]
+requires = ["flit_core>=3.12,<5"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "vappman"
+dynamic = ["version"]
+description = "A visual wrapper for appman"
+authors = [
+    { name = "Joe Defen", email = "joedef@google.com" }
+]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+keywords = ["app", "installer", "manager", "appimages"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: POSIX :: Linux"
+]
+dependencies = [
+    'console-window ~= 3.1.0',
+]
+
+[project.urls]
+"Homepage" = "https://github.com/joedefen/vappman"
+"Bug Tracker" = "https://github.com/joedefen/vappman/issues"
+
+[project.scripts]
+vappman = "vappman.main:main"

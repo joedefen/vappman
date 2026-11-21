@@ -1,0 +1,1160 @@
+#!/usr/bin/env python3
+"""Interactive, visual thin layer atop appman/am"""
+
+import argparse
+import curses as cs
+import os
+import re
+import shlex
+import subprocess
+import sys
+import textwrap
+import time
+import traceback
+from types import SimpleNamespace
+
+from console_window import (
+    BasicHelpScreen,
+    ConsoleWindow,
+    ConsoleWindowOpts,
+    Context,
+    Glyphs,
+    IncrementalSearchBar,
+    InlineConfirmation,
+    OptionSpinner,
+    Screen,
+    ScreenStack,
+    Theme,
+)
+
+from . import AppimageDoctor, __version__
+from .Appearance import (
+    MONO_THEME,
+    appearance_choices,
+    appearance_label,
+    colors_enabled,
+    resolve_ui_prefs,
+    semantic_attr,
+    set_colors_enabled,
+)
+from .AppmanLauncher import AppmanLauncher
+from .AppmanVars import AppmanVars
+from .PersistentState import PersistentState
+from .Prerequisites import Prerequisites
+from .VappmanListCache import AppCacheManager
+
+# Screen constants
+HOME_ST, HELP_ST, THEMES_ST = 0, 1, 2
+SCREENS = ['HOME', 'HELP', 'THEMES']
+
+# Install options offered by the inline install prompt: (key, label, am flags).
+# The persisted `install_opts` is the "last used" choice that '*' and 'y' refer to.
+# Keys avoid 'i' (the key that opens the prompt) and are single strokes.
+INSTALL_OPTIONS = (
+    ('n', 'none', ''),
+    ('s', 'sandbox', 'sandbox'),
+    ('c', 'icons', 'icons'),
+    ('b', 'both', 'icons,sandbox'),
+)
+INSTALL_OPTION_KEYS = {ord(key): flags for key, _, flags in INSTALL_OPTIONS}
+
+
+def notice_mark():
+    """The two-cell 'pay attention' badge used on prompted rows.
+
+    Asked of console-window's glyph registry rather than pasted as a literal,
+    so ASCII mode substitutes the registered fallback
+    (``'S '``) and the prompt column keeps its two cells.
+    Called at draw time because the glyph mode is process state,
+    decided when the first window is created.
+    """
+    return Glyphs.get('star_glow')
+
+
+def _install_option_key(install_opts):
+    """Return the menu key matching a persisted `install_opts` value."""
+    flags = frozenset(x for x in (install_opts or '').split(',') if x)
+    for key, _, value in INSTALL_OPTIONS:
+        if frozenset(x for x in value.split(',') if x) == flags:
+            return key
+    return 'n'
+
+
+def install_options_legend(install_opts):
+    """One-line key legend for the install prompt; '*' marks the last choice."""
+    active = _install_option_key(install_opts)
+    parts = [f'{"*" if key == active else ""}{key}:{label}'
+             for key, label, _ in INSTALL_OPTIONS]
+    return ' '.join(parts) + ' y:last ESC'
+
+
+# Installed-row actions that get the same inline y/ESC prompt as remove.
+# The key is the confirmation action_type; its value labels the prompt.
+INSTALLED_ACTION_LABELS = {
+    'remove': 'Remove',
+    'backup': 'Backup',
+    'sandbox': 'Sandbox',
+    'unsandbox': 'Unsandbox',
+    'icons': 'Set icons for',
+}
+
+# Commands vappman has already confirmed inline,
+# so AM's own final yes/no must be suppressed with
+# its global -y/--assume-yes (which must be argv[1]).  NOTE: for --sandbox,
+# AM's -y also answers its "configure directory access" prompts with yes,
+# granting the app access to every XDG user directory.
+# Drop '--sandbox' from this set to let AM ask those questions interactively.
+ASSUME_YES_COMMANDS = frozenset({
+    'install', 'remove', 'backup', '--icons', '--sandbox', '--disable-sandbox',
+})
+
+class VappmanScreen(Screen):
+    """ Base class for all VappmanScreens"""
+    app: 'Vappman'  # Type hint for IDE support
+
+    def quit_ACTION(self):
+        """ TBD """
+        self.win.stop_curses()
+        os.system('clear; stty sane')
+        sys.exit(0)
+
+    def help_ACTION(self):
+        """ TBD """
+        app, win = self.app, self.app.win
+        app.ss.push(HELP_ST, win.pick_pos)
+
+
+class HomeScreen(VappmanScreen):
+    """Main home screen showing installed and available apps"""
+
+    @staticmethod
+    def is_sandboxed(info):
+        """ Given the 'info' namespace for an installed app,
+        return whether sandboxed """
+        return bool(info and info.app_type and '🔒' in info.app_type)
+
+    def add_folded_synopsis_lines(self, fold_offset, wrapped_lines, num=1):
+        """Add wrapped synopsis continuation lines as TRANSIENT context lines.
+
+        Used to display long synopsis text across multiple
+        indented lines when an app is selected (at pick position).
+        Lines are marked as TRANSIENT so they appear/disappear with selection.
+
+        :param fold_offset: Horizontal position where continuation text should start
+        :param wrapped_lines: Pre-wrapped lines from textwrap.wrap() with indent params
+        :param num: Maximum number of continuation lines to display (default: 1)
+        """
+        def make_indent(amount, corner):
+            rv = ' '*4
+            if amount > 6:
+                rv = ' ' * (amount-5)
+                rv += ' ╰── ' if corner else ' │    '
+            return rv
+
+        indent = make_indent(2+fold_offset, False)
+        lines = wrapped_lines[1:1+num]
+        for line in lines[:-1]:
+            # Indent to fold_offset position
+            self.add_body(indent + line, context=Context("TRANSIENT"))
+        indent = make_indent(2+fold_offset, True)
+        if len(lines) > 0:
+            self.add_body(indent + wrapped_lines[-1], context=Context("TRANSIENT"))
+
+
+    def get_folded_synopsis(self, offset1, offset2, text):
+        """ TBD """
+        width = self.win.cols - 2 - offset2
+        initial_indent = offset1 - offset2
+        if width > offset1:
+            wraps = textwrap.wrap(
+                text,
+                width=width,
+                initial_indent=' '*initial_indent
+            )
+            if wraps:
+                wraps[0] = wraps[0][initial_indent:]
+            return wraps
+        return [text]
+
+    def _confirming_action(self, ns, action):
+        """True when the inline `action` confirmation is waiting on row `ns`."""
+        app = self.app
+        pending = app.pending_action
+        info = pending[1] if pending else None
+        return (app.confirmation.active
+                and app.confirmation.action_type == action
+                and info is not None
+                and (ns.appname, ns.db) == (info.appname, info.db))
+
+    def _confirmation_prompt(self):
+        """Prompt row text for the active installed-app action ('' for install)."""
+        app = self.app
+        label = INSTALLED_ACTION_LABELS.get(app.confirmation.action_type or '')
+        pending = app.pending_action
+        if label is None or pending is None:
+            return ''
+        return f'    {notice_mark()}  {label} {pending[1].appname}? Press y or ESC'
+
+
+    def draw_screen(self):
+        """Draw the home screen with app list ⮜–⮞
+        """
+        app = self.app
+        win = self.win  # window-only services: cols, demo mode, picked context
+        all_dbs = bool(app.opts.database == 'ALL')
+        searching = app.search_bar.is_active
+        selected_key = None
+
+        wanted = app._make_wanted()
+
+        def picked(row_idx):
+            """True when the given row should be shown as the selected line."""
+            return not searching and row_idx == win.pick_pos
+
+        self.set_pick_mode(not searching)
+        win.set_demo_mode(app.opts.demo_mode)
+
+        title = "APPMAN"
+        if not app.has_appman:
+            was_in_system_mode = app.in_system_mode 
+            app.in_system_mode = app.appman.is_system_mode()
+            title = 'm:AM-SYSTEM' if app.in_system_mode else 'm:AM-USER'
+            if was_in_system_mode != app.in_system_mode:
+                app.installs, app.installs_by_appname = app.get_installed(repull=False)
+        # Save persistent state if any options changed
+        app.disk_state.save_if_changed(app.opts)
+
+
+        # ############################################ Show INSTALLED
+        # apps first ############################################
+        idx = 0
+        for (appname, db), ns in app.installs.items():
+            # ns2 = app.basics.get(appname, None)
+            if ns and wanted(ns):
+                where = "S" if 'S' in ns.where else '─' # "⋅"
+                where += "U" if 'U' in ns.where else '─' # "⋅"
+                check = '🔒' if self.is_sandboxed(ns) else ' ✔'
+                checks = f'{check}{where}'
+                # name = f'{appname}⮜{ns.db}⮞' if all_dbs else appname
+                name = f'{appname} ﹫{ns.db}' if all_dbs else appname
+                wid = 18 if all_dbs else 10
+                line = f'{checks} '
+                fold_offset = len(line) + wid
+                line += f'{name:<{wid}} '
+                first_synopsis_offset = len(line)
+
+                if picked(idx):
+                    wraps = self.get_folded_synopsis(first_synopsis_offset, fold_offset, ns.synopsis)
+                    line += wraps[0]
+                else:
+                    line += ns.synopsis
+
+                status = "installed" if app.in_system_mode or 'U' in where else "uninstalled"
+                # Color is decoration: installed rows are
+                # also marked by ✔/🔒 and the S/U flags, so HOTSWAP only reinforces them.
+                attr = semantic_attr(Theme.HOTSWAP) if status == 'installed' else None
+                self.add_body(line, attr=attr, context=Context(status, info=ns))
+
+                if picked(idx):
+                    selected_key = (appname, db)
+                    #wraps.append(f'🅥 {ns.version} {ns.app_type}')
+                    wraps.append(f'🠞 {ns.version} {ns.app_type}')
+                    self.add_folded_synopsis_lines(fold_offset, wraps, num=2)
+                    if self._confirming_action(ns, app.confirmation.action_type):
+                        prompt = self._confirmation_prompt()
+                        if prompt:
+                            # Below the entry's own rows,
+                            # so the synopsis and version/type stay readable while deciding.
+                            # TRANSIENT (non-pickable) so the engine's auto-abut reserves
+                            # the row even when the pick sits at the viewport bottom.
+                            self.add_body(
+                                prompt, attr=cs.A_BOLD | semantic_attr(Theme.DANGER),
+                                context=Context("TRANSIENT", pickable=False))
+                idx += 1
+
+        # ############################################ Show UNINSTALLED
+        # apps afterwards ############################################
+        for (appname, db), ns in app.apps_by_name_db.items():
+            if (appname, db) not in app.installs and wanted(ns):
+                fill = '⋅' if idx % 3 == 100 else ''
+                # name = f'{appname}⮜{ns.db}⮞' if all_dbs else appname
+                name = f'{appname} @{ns.db}' if all_dbs else appname
+                wid = 18 if all_dbs else 10
+                line = f'{"◆":>4} '
+                fold_offset = len(line) + wid
+                line += f'{name:{fill}<{wid}}  '
+                first_synopsis_offset = len(line)
+
+                # Calculate offsets for uninstalled apps
+                if picked(idx):
+                    wraps = self.get_folded_synopsis(first_synopsis_offset, fold_offset, ns.synopsis)
+                    line += wraps[0]
+                else:
+                    line += ns.synopsis
+
+                self.add_body(line, context=Context("uninstalled", info=ns))
+
+                if picked(idx):
+                    selected_key = (appname, db)
+                    self.add_folded_synopsis_lines(fold_offset, wraps)
+                    if self._confirming_action(ns, 'install'):
+                        self.add_body(
+                            f'    {notice_mark()}  Install {appname}?',
+                            attr=cs.A_BOLD | semantic_attr(Theme.DANGER),
+                            context=Context("TRANSIENT", pickable=False))
+                        self.add_body(
+                            '    ' + install_options_legend(app.opts.install_opts),
+                            attr=cs.A_DIM,
+                            context=Context("TRANSIENT", pickable=False))
+
+                idx += 1
+
+        app.pick_identity = selected_key
+
+        # ############################################ Create
+        # HEADER LINES ############################################
+        header1 = f'{title}  {app.get_keys_line()}'
+        self.add_fancy_header(header1, app.opts.fancy_header, line_attr=cs.A_DIM)
+
+        header2, context = '', self.win.get_picked_context()
+        if context:
+            header2 = f' #:maxBkUp={app.opts.max_backups}   '
+            if context.genre == 'installed':
+                header2 += ' [r]mv [u]pd C:icons [b]kup [a]bout'
+                cnt = len(app.appman.get_snapshots(
+                            context.info.appname, app.opts.max_backups))
+                if cnt:
+                    header2 += f' [o]verwr/{cnt}'
+                sandboxed = self.is_sandboxed(context.info)
+                header2 += ' S:' + ('unbox' if sandboxed else 'box')
+                header2 += ' [t]est'
+            elif context.genre == 'uninstalled':
+                conflicts = app.installs_by_appname.get(context.info.appname, None)
+                if conflicts:
+                    header2 += f' install-conflicts={conflicts}'
+                else:
+                    header2 += ' [i]nstall [a]bout'
+
+        self.add_fancy_header(header2, app.opts.fancy_header, line_attr=cs.A_DIM)
+
+    def appman_on_installed(self, verb):
+        """ TBD """
+        context = self.win.get_picked_context()
+        if context and context.genre == 'installed':
+            self.app.run_appman(verb, context.info)
+
+    def _confirm_installed_action(self, action, verb):
+        """Ask inline y/ESC before running `verb` on the picked installed app."""
+        app = self.app
+        context = self.win.get_picked_context()
+        if context and context.genre == 'installed':
+            # Don't run appman yet: draw the prompt below this row and let
+            # 'y' (confirm) or ESC (abort) decide in Vappman.main_loop().
+            app.pending_action = (verb, context.info)
+            app.confirmation.start(action, context.info.appname, mode='y')
+            self.win.passthrough_mode = True
+
+    def remove_ACTION(self):
+        self._confirm_installed_action('remove', 'remove')
+
+    def update_ACTION(self):
+        """ TBD """
+        return self.appman_on_installed('update')
+
+    def backup_ACTION(self):
+        self._confirm_installed_action('backup', 'backup')
+
+    def overwrite_ACTION(self):
+        """ TBD """
+        self.appman_on_installed('overwrite')
+
+    def sandbox_ACTION(self):
+        context = self.win.get_picked_context()
+        if context and context.genre == 'installed':
+            if self.is_sandboxed(context.info):
+                self._confirm_installed_action('unsandbox', '--disable-sandbox')
+            else:
+                self._confirm_installed_action('sandbox', '--sandbox')
+
+    def icons_ACTION(self):
+        self._confirm_installed_action('icons', '--icons')
+
+    def about_ACTION(self):
+        """ TBD """
+        context = self.win.get_picked_context()
+        if context:
+            self.app.run_appman('about', context.info)
+
+    def test_ACTION(self):
+        """ TBD """
+        context = self.win.get_picked_context()
+        if context and context.genre == 'installed':
+            launched = self.app.launcher.launch_test_in_terminal(
+                context.info.appname,
+                context.info.appname
+            )
+            if launched:
+                # The new terminal window covers ours; repaint so curses'
+                # model of the screen matches the tty again on return.
+                self.app.win.render(redraw=True)
+
+    def default_ACTION(self):
+        """ TBD """
+        context = self.win.get_picked_context()
+        if context and context.genre == 'installed':
+            return self.remove_ACTION()
+        if context and context.genre == 'uninstalled':
+            return self.install_ACTION()
+
+    #################################
+    def install_ACTION(self):
+        """Ask for an inline y/ESC confirmation before installing the picked app."""
+        app = self.app
+        context = self.win.get_picked_context()
+        if context and context.genre == 'uninstalled':
+            # Don't run appman yet: draw the inline prompt on this row and
+            # let 'y' (confirm) or ESC (abort) decide in Vappman.main_loop().
+            app.pending_action = ('install', context.info)
+            app.confirmation.start('install', context.info.appname, mode='y')
+            self.win.passthrough_mode = True
+
+    #################################
+    def reinstall_ACTION(self):
+        """ TBD """
+        return self.app.run_appman('reinstall')
+
+    def sync_ACTION(self):
+        """ TBD """
+        return self.app.run_appman('sync')
+
+    def clean_ACTION(self):
+        """ TBD """
+        return self.app.run_appman('clean')
+
+    def update_all_ACTION(self):
+        """ TBD """
+        return self.app.run_appman('update')
+
+    def reinstall_all_ACTION(self):
+        """ TBD """
+        return self.app.run_appman('reinstall')
+
+    #################################
+    def escape_filter_ACTION(self):
+        """ Clear filter and jump to top """
+        app = self.app
+        app.search_bar._text = ''  # Clear search bar text
+        app.filter = None
+        app.win.pick_pos = 0
+
+    def slash_ACTION(self):
+        """ Enter search-as-you-type mode """
+        app = self.app
+        # Remember which app is selected now so the same logical selection can
+        # be restored even if the edit reorders/reindexes the filtered list.
+        keys = app.visible_app_keys()
+        app.search_anchor = keys[app.win.pick_pos] if 0 <= app.win.pick_pos < len(keys) else None
+        # Start search with current filter text
+        app.search_bar.start(app.search_bar.text)
+        # Enable pass-through mode so all printable keys are returned
+        app.win.passthrough_mode = True
+        return None
+
+    def toggle_system_mode_ACTION(self):
+        """ Switch between user and system mode """
+        app = self.app
+        if app.in_system_mode:
+            return app.run_appman('--user')
+        return app.run_appman('--system')
+
+    def theme_screen_ACTION(self):
+        """'T' opens the theme picker; ESC there returns to the report."""
+        self.app.ss.push(THEMES_ST, self.app.win.pick_pos)
+
+
+class VappmanHelpScreen(BasicHelpScreen):
+    """Help screen with vappman-specific additions"""
+
+    def draw_screen(self):
+        """Draw help screen with extra vappman info"""
+        # Call parent to show standard help
+        super().draw_screen()
+
+    def escape_help_ACTION(self):
+        """ Leave Help (return to prior screen) """
+        app = self.app
+        app.ss.pop()
+
+    def theme_screen_ACTION(self):
+        """'T' opens the theme picker; ESC there returns to Help."""
+        self.app.ss.push(THEMES_ST, self.app.win.pick_pos)
+
+
+THEME_CYCLE_KEY = 't'
+
+THEME_PICKER_NOTE = 'The choice is remembered for the next run.'
+
+_ThemePickerScreen = Theme.create_picker_screen(
+    VappmanScreen,
+    cycle_key=THEME_CYCLE_KEY,
+    note=THEME_PICKER_NOTE,
+)
+
+
+class VappmanThemeScreen(_ThemePickerScreen):
+    """Theme picker over console-window's themes plus vappman's 'mono'."""
+
+    def theme_label(self, theme_name):
+        """Name 'mono' while color is off, so header and swatches agree.
+
+        With color on the generic label names the installed palette.
+        With color off the swatches are drawn from the monochrome role attributes,
+        so naming the palette left underneath would tell a different story.
+        """
+        if not colors_enabled():
+            return MONO_THEME
+        return super().theme_label(theme_name)
+
+    def spin_theme_ACTION(self):
+        """'t' advances to the next appearance (mono included) and persists it."""
+        self.app.cycle_appearance()
+
+    def escape_theme_ACTION(self):
+        """ESC returns to whichever screen opened the picker."""
+        self.app.ss.pop()
+
+
+class Vappman(Prerequisites):
+    """ Main class for curses atop appman"""
+    singleton = None
+
+    def __init__(self, cli_theme=None, no_color=False):
+        # self.cmd_loop = CmdLoop(db=False) # just running as command
+        super().__init__()
+        assert not Vappman.singleton
+        Vappman.singleton = self
+
+        self.check_preqreqs()
+        print(f'{self.has_am=}')
+        print(f'{self.has_appman=}')
+        self.disk_state = PersistentState('vappman',
+                      max_backups=1, install_opts='', database='am',
+                      theme='', colors=True)
+        self.appearance_theme, self.appearance_colors = resolve_ui_prefs(
+            cli_theme, no_color,
+            self.disk_state.theme, self.disk_state.colors)
+        set_colors_enabled(self.appearance_colors)
+        self.appman = AppmanVars()
+        self.launcher = AppmanLauncher(self.appman)
+
+        self.actions = {} # currently available actions
+        self.filter = None # compiled pattern
+
+        self.search_bar = IncrementalSearchBar(
+            on_change=lambda text: self.compile_filter(text),
+            on_accept=lambda text: self._on_search_accept(text),
+            on_cancel=lambda text: self._on_search_cancel(text)
+        )
+        self.confirmation = InlineConfirmation()
+        self.pending_action = None
+        self.search_anchor = None
+        self.pick_identity = None
+        self.terminal_emulator = None
+        self.has_am = None
+
+        self.prev_pos = 0
+        self.next_prompt_seconds = [0.1, 0.1]  # Initial fast renders, then slow down
+        self.cache_mgr = AppCacheManager()
+        self.apps_to_list = self.cache_mgr.get_apps()
+        self.apps_by_name_db = self.cache_mgr.apps_by_key
+        self.saved_outputs = {}
+        self.installs, self.installs_by_appname = self.get_installed() # dict keyed by app
+        self.in_system_mode = self.appman.is_system_mode()
+
+        win_opts = ConsoleWindowOpts()
+        win_opts.head_line=True
+        win_opts.body_rows=len(self.apps_by_name_db)+1000
+        win_opts.head_rows = 10
+        win_opts.pick_attr = cs.A_BOLD|cs.A_UNDERLINE
+        win_opts.dialog_abort = True
+        win_opts.ctrl_c_terminates = False
+        win_opts.min_cols_rows = (60, 10)
+        win_opts.theme = MONO_THEME if not self.appearance_colors else (
+            self.appearance_theme or 'default')
+
+        self.win = ConsoleWindow(win_opts)
+
+        # Initialize screens and screen stack
+        self.screens = {
+            HOME_ST: HomeScreen(self),
+            HELP_ST: VappmanHelpScreen(self),
+            THEMES_ST: VappmanThemeScreen(self),
+        }
+        self.ss = ScreenStack(self.win, None, SCREENS, self.screens)
+
+        spin = self.spin = OptionSpinner(stack=self.ss, quit_keys='qx\x03')
+        self.opts = spin.default_obj
+        spin.add_key('help', '? - enter help screen', genre='action')
+        dbs = sorted(list(self.cache_mgr.dbs))
+        spin.add_key('database', 'd - select app database', vals=['ALL'] + dbs)
+
+        spin.add_key('fancy_header', '_ - fancy header mode', vals=['Underline', 'Reverse', 'Off'])
+        spin.add_key('demo_mode', '* - demo_mode', vals=[False, True])
+        if not self.has_appman:
+            spin.add_key('toggle_system_mode', 'm - toggle system mode', genre='action')
+        spin.add_key('max_backups', '# - max backups per app', vals=[-1, 2, 1])
+        self.opts.max_backups = self.disk_state.max_backups
+        self.opts.install_opts = self.disk_state.install_opts
+        self.opts.database = self.disk_state.database
+
+
+        spin.add_key('sync', 's - sync (update appman itself)', genre='action')
+        spin.add_key('clean', 'c - clean (remove unneeded files/folders)', genre='action')
+        spin.add_key('update_all', 'U - update ALL installed apps', genre='action')
+        spin.add_key('reinstall_all', 'R - reinstall ALL apps w updated install script', genre='action')
+        spin.add_key('slash', '/ - filter apps by keywords or regex', genre='action')
+        spin.add_key('escape_filter', 'ESC - clear filter and jump to top',
+                     genre='action', keys=27, scope=HOME_ST)
+
+        spin.add_key('install', 'i - install uninstalled app', genre='action')
+        spin.add_key('default', 'ENTER - install/uninstall app',
+                     genre='action', keys=[cs.KEY_ENTER, 10], scope=HOME_ST)
+        spin.add_key('remove', 'r - remove installed app', genre='action')
+
+        spin.add_key('sandbox', 'S - Sandbox/Unsandbox app', genre='action')
+        spin.add_key('icons', 'C - appimage given local icon themes', genre='action')
+
+        spin.add_key('about', 'a - about (more info about app)', genre='action')
+
+        spin.add_key('backup', 'b - backup installed app', genre='action')
+        spin.add_key('update', 'u - update_installed app', genre='action')
+        spin.add_key('overwrite', 'o - overwrite app from its backup', genre='action')
+        spin.add_key('test', 't - test (open a terminal and run app', genre='action')
+        spin.add_key('theme_screen', 'T - theme picker', genre='action', keys='T')
+        spin.add_key('spin_theme', 't - cycle theme', genre='action', keys='t')
+        spin.add_key('escape_theme', 'ESC - leave theme picker', genre='action',
+                      keys=27, scope=THEMES_ST)
+        spin.add_key('escape_help', 'ESC - leave help (return to prior screen)',
+                      genre='action', keys=27, scope=HELP_ST)
+        self.win.set_handled_keys(self.spin)
+
+
+    def cmd_dict(self, cmd, repull=True):
+        """ Get lines with the given start put into a dict keyed by the
+            1st word.
+        """
+        def parse_app_list(lines):
+            nonlocal switch_to_system_mode
+            installs, installs_by_appname = {}, {}
+            local = True if self.has_appman else False
+            has_db_column = False
+
+
+            for line in lines:
+                line = line.strip()
+                if not self.has_appman and 'HAVE INSTALLED' in line:
+                    local = bool('LOCAL' in line)
+
+                if line.startswith('- APPNAME'):
+                    has_db_column = bool('| DB' in line or '|DB' in line)
+
+                if line.startswith('◆'):
+                    # Remove the symbol and split by pipe '|' We strip
+                    # whitespace and also remove the '*' indicator for libfuse2
+                    parts = [p.strip().rstrip('*') for p in line[1:].split('|')]
+
+                    if len(parts) in (4, 5):
+                        name = parts[0]
+                        if name in ('am', 'appman', ):
+                            continue
+
+                        # Use header info to determine column layout
+                        if has_db_column and len(parts) == 5:
+                            db = parts[1]
+                            version = parts[2]
+                            app_type = parts[3]
+                        else:
+                            db = 'am'
+                            version = parts[1]
+                            app_type = parts[2]
+
+                        where = 'S' if not local else ''
+                        where += 'U' if local else ''
+
+                        ns = installs.get((name, db), None)
+                        if ns:  # we have both user and system apps
+                            if switch_to_system_mode and local:
+                                ns.version=version
+                            ns.where += where
+                        else:
+                            installs[(name,db)] = SimpleNamespace(appname=name, db=db,
+                                        version=version, app_type=app_type,
+                                        where=where, synopsis=None, raw=line)
+
+                        if name in installs_by_appname:
+                            installs_by_appname[name].add(db)
+                        else:
+                            installs_by_appname[name] = set([db])
+
+            return installs, installs_by_appname
+        command = ['appman' if self.has_appman else 'am']
+        command += cmd.split()
+        output_key = ' '.join(command)
+        switch_to_system_mode = not self.has_appman and self.appman.is_user_mode()
+
+        output = self.saved_outputs.get(output_key, None)
+        if repull or not output:
+            if 'files' in cmd.split():
+                if switch_to_system_mode is True:
+                    # temp: promote to system mode to get all apps
+                    self.appman.set_system_mode_cheat(True)
+
+            try:
+                result = subprocess.run(command, stdout=subprocess.PIPE, # noqa: UP022
+                        stderr=subprocess.PIPE, check=False)
+            except Exception as exc:
+                ConsoleWindow.stop_all()
+                if switch_to_system_mode is True:
+                    self.appman.set_system_mode_cheat(False)
+                print(f'FAILED: {command}: {exc}')
+                sys.exit(1)
+            if switch_to_system_mode is True:
+                self.appman.set_system_mode_cheat(False)
+
+            if result.returncode != 0:
+                print(f'WARNING: {command}: {result.returncode=}')
+
+            try:
+                output = result.stdout.decode('utf-8', errors='replace')
+            except Exception:
+                try:
+                    output = result.stdout.decode('latin-1', errors='replace')
+                except Exception:
+                    output = str(result.stdout, errors='replace')
+            if output:
+                self.saved_outputs[output_key] = output
+
+        lines = output.splitlines()
+        rv = parse_app_list(lines)
+        return rv
+
+    def get_installed(self, repull=True):
+        """ Get the list of lines of installed apps """
+        rv, installs_by_appname = self.cmd_dict('files --byname', repull=repull)
+        for app_db_key, info in rv.items():
+            basic = self.apps_by_name_db.get(app_db_key, None)
+            if basic:
+                info.synopsis = basic.synopsis
+        return rv, installs_by_appname
+
+    def navigate_to(self, screen_num):
+        """Navigate to a screen with validation hooks."""
+        result = self.ss.push(screen_num, self.prev_pos)
+        if result is not None:
+            self.prev_pos = result
+            return True
+        return False
+
+    def navigate_back(self):
+        """Navigate back to previous screen."""
+        result = self.ss.pop()
+        if result is not None:
+            self.prev_pos = result
+            return True
+        return False
+
+    def handle_escape(self):
+        """Handle ESC key - clear filter or go back."""
+        if self.ss.stack:
+            return self.navigate_back()
+        # If no stack, clear filter and jump to top
+        self.search_bar._text = ''
+        self.filter = None
+        self.win.pick_pos = 0
+        return True
+
+    def main_loop(self):
+        """Main application loop using screen stack navigation."""
+        win = self.win
+        last_database = self.opts.database
+
+        while True:
+            screen = self.screens[self.ss.curr.num]
+            screen.clear()
+            screen.draw_screen()
+
+            win.render()
+            key = win.prompt(seconds=self.next_prompt_seconds[0])
+            if self.cache_mgr.check_for_updates(): # this happens once at most
+                self.apps_by_name_db = self.cache_mgr.apps_by_key
+                self.installs, self.installs_by_appname = self.get_installed(repull=False)
+                self.restore_selection(self.pick_identity)
+
+            self.next_prompt_seconds.pop(0)
+            if not self.next_prompt_seconds:
+                self.next_prompt_seconds = [3.0]
+
+            if key is not None:
+                if self.confirmation.active:
+                    self._handle_confirmation_key(key)
+                elif self.search_bar.handle_key(key):
+                    pass # Key was handled by search bar, skip normal processing
+                else:
+                    if self.search_bar._active:
+                        self.search_bar._active = False
+                        self._on_search_accept(self.search_bar._text)
+
+                    self.spin.do_key(key, win)
+
+                    if self.opts.quit:
+                        self.opts.quit = False
+                        break
+
+                    self.ss.perform_actions(self.spin)
+
+                    # The 'd' key cycles databases, replacing every row;
+                    # keep the cursor on the same app when it exists in the new database.
+                    if self.opts.database != last_database:
+                        last_database = self.opts.database
+                        self.restore_selection(self.pick_identity)
+
+    def _handle_confirmation_key(self, key):
+        """Route one key to the active inline install/remove confirmation."""
+        if self.confirmation.action_type == 'install':
+            self._handle_install_choice(key)
+            return
+        if key == ord('Y'):
+            key = ord('y')  # accept Shift-Y as 'yes' too
+        result = self.confirmation.handle_key(key)
+        if result == 'confirmed':
+            pending = self.pending_action
+            self._cancel_confirmation()
+            if pending is not None:
+                subcommand, info = pending
+                self.run_appman(subcommand, info)
+        elif result == 'cancelled':
+            self._cancel_confirmation()
+
+    def _handle_install_choice(self, key):
+        """Handle the one-key install menu: n/s/c/b, or y for the last choice."""
+        if ord('A') <= key <= ord('Z'):
+            key += ord('a') - ord('A')
+        if key == 27:  # ESC aborts the install
+            self._cancel_confirmation()
+            return
+        if key == ord('y'):
+            flags = self.opts.install_opts  # '*' / last confirmed choice
+        else:
+            flags = INSTALL_OPTION_KEYS.get(key)
+            if flags is None:
+                return  # only the menu keys are valid here
+        pending = self.pending_action
+        self.opts.install_opts = flags
+        self.disk_state.save_if_changed(self.opts)
+        self._cancel_confirmation()
+        if pending is not None:
+            self.run_appman(*pending)
+
+    def _cancel_confirmation(self):
+        """Drop any pending inline confirmation and re-enable normal keys."""
+        self.confirmation.cancel()
+        self.pending_action = None
+        self.win.passthrough_mode = False
+
+    def _on_search_accept(self, text):
+        """Callback when search is accepted (ENTER pressed)"""
+        self.win.passthrough_mode = False
+        self._restore_selection()
+        self.search_anchor = None
+
+    def _on_search_cancel(self, text):
+        """Callback when search is canceled (ESC pressed)"""
+        self.win.passthrough_mode = False
+        self._restore_selection()
+        self.search_anchor = None
+
+    def compile_filter(self, pattern):
+        """Compile filter pattern and update display immediately"""
+        pattern = pattern.strip()
+        if not pattern:
+            self.filter = None
+            return
+        try:
+            if re.match(r'^[\-\w\s]*$', pattern):
+                words = pattern.split()
+                self.filter = re.compile(r'\b' + r'(|.*\b)'.join(words), re.IGNORECASE)
+            else:
+                self.filter = re.compile(pattern, re.IGNORECASE)
+        except Exception:
+            self.filter = None  # Invalid regex - show no matches
+
+    def _make_wanted(self):
+        """Build the row predicate for the current database/filter settings.
+
+        Single source of truth for which rows are displayed;
+        shared by both the render loop and the selection-restore logic so they cannot drift.
+        """
+        app = self
+        all_dbs = bool(app.opts.database == 'ALL')
+
+        def wanted(ns):
+            if not all_dbs and app.opts.database != ns.db:
+                return False
+            if not app.filter:
+                return True
+            if not ns:
+                return False
+            return app.filter.search(ns.appname + ' @' + ns.db + ' ' + ns.synopsis)
+
+        return wanted
+
+    def visible_app_keys(self):
+        """Return (appname, db) for each displayed row, in display order.
+
+        Installed apps are listed first, then available ones,
+        exactly matching the order used by HomeScreen.draw_screen().
+        """
+        wanted = self._make_wanted()
+        keys = []
+        for (appname, db), ns in self.installs.items():
+            if ns and wanted(ns):
+                keys.append((appname, db))
+        for (appname, db), ns in self.apps_by_name_db.items():
+            if (appname, db) not in self.installs and wanted(ns):
+                keys.append((appname, db))
+        return keys
+
+    def selected_app_key(self):
+        """Return the (appname, db) of the currently picked row, or None."""
+        keys = self.visible_app_keys()
+        if 0 <= self.win.pick_pos < len(keys):
+            return keys[self.win.pick_pos]
+        return None
+
+    def restore_selection(self, anchor, fallback_to_top=False):
+        """Re-locate the pick by app identity after the set of rows changes.
+
+        The cursor "follows the app": if `anchor` is still displayed
+        -- even at a new position -- it becomes the selection again.  When the app is gone,
+        either jump to the top (fallback_to_top=True) or keep the current
+        index clamped to the new list length (fallback_to_top=False).
+
+        :param anchor: (appname, db) identity to keep selected; None is a no-op.
+        :param fallback_to_top: behavior when the anchored app is no longer shown.
+        """
+        if anchor is None:
+            return
+        keys = self.visible_app_keys()
+        if not keys:
+            self.win.pick_pos = 0
+        elif anchor in keys:
+            self.win.pick_pos = keys.index(anchor)
+        elif fallback_to_top:
+            self.win.pick_pos = 0
+        else:
+            self.win.pick_pos = min(self.win.pick_pos, len(keys) - 1)
+
+    def _restore_selection(self):
+        """Search-exit hook: keep the anchored app selected, else go to top."""
+        self.restore_selection(self.search_anchor, fallback_to_top=True)
+
+    def get_keys_line(self):
+        """ Build header line with fancy formatting markup (static actions only) """
+        # Static actions with markup for fancy headers
+        line = (f'[s]ync [c]lean [U]pd [R]eInst [T]heme [q]uit ?:help'
+                f'  [d]b={self.opts.database}')
+        # Add search bar display string
+        line += self.search_bar.get_display_string(prefix=' /')
+        line += '  '
+        return line
+
+    def appearance_choices(self):
+        """Every appearance the picker cycles, in order."""
+        return appearance_choices()
+
+    def appearance_label(self):
+        """The appearance the picker should show as current."""
+        return appearance_label(self.appearance_theme, self.appearance_colors)
+
+    def apply_appearance(self, name):
+        """Make *name* live ('mono' turns color off) and remember it.
+
+        The preference is written immediately so an early exit cannot lose it,
+        and the window is told which theme was installed.
+        ``mono`` is a real console-window theme in 3.0,
+        so the window is given that name: a reader of
+        ``win.theme`` sees the no-color appearance,
+        and ``Theme.set_active`` (called by ``set_theme``)
+        turns the semantic-color switch off with it.  The switch is also set here,
+        because vappman resolves the preference pair before any window
+        exists and a host without ``set_theme`` must still end up monochrome.
+        """
+        mono = name == MONO_THEME
+        self.appearance_colors = not mono
+        # '' is the library default; keep the saved file canonical.
+        self.appearance_theme = '' if mono or name == 'default' else name
+        self.win.set_theme(MONO_THEME if mono else name)
+        set_colors_enabled(not mono)
+        self.disk_state.theme = self.appearance_theme
+        self.disk_state.colors = self.appearance_colors
+        self.disk_state.save()
+
+    def cycle_appearance(self):
+        """Advance the picker by one appearance (mono is the last entry)."""
+        choices = self.appearance_choices()
+        current = self.appearance_label()
+        idx = choices.index(current) if current in choices else -1
+        self.apply_appearance(choices[(idx + 1) % len(choices)])
+
+    def _build_appman_cmd(self, subcommand: str, info: SimpleNamespace = None):
+        """Build the appman/am argv for one command (pure, easy to test)."""
+        appname = info.appname if info else None
+        cmd = ['appman' if self.has_appman else 'am']
+        if subcommand in ASSUME_YES_COMMANDS:
+            # AM's global --assume-yes/-y must be the *first* argument.
+            # The user has already confirmed in vappman's inline prompt,
+            # so AM must not ask a second time.
+            cmd.append('-y')
+        cmd.append(subcommand)
+        if subcommand == 'install':
+            for opt in self.opts.install_opts.strip().split(','):
+                if opt:
+                    cmd.append(f'--{opt}')
+
+        if subcommand in ('install', 'about'):
+            if info and info.db != 'am':
+                appname += f'.{info.db}'
+        if appname:
+            cmd.append(appname)
+        return cmd
+
+    def run_appman(self, subcommand: str, info: SimpleNamespace = None):
+        """ Run an 'appman' command using subprocess. """
+
+        # Remember the selected app so the cursor can follow it back
+        # after the command changes which rows exist or where they sit.
+        anchor = self.selected_app_key()
+        # 1. Build the command list
+        cmd = self._build_appman_cmd(subcommand, info)
+
+        # 2. Leave curses but keep the window alive: endwin() restores the tty
+        # (so appman and the ENTER prompt work) and render() re-enters curses afterwards.
+        # stop_curses() would tear the window down for good.
+        cs.endwin()
+        os.system('clear; stty sane')
+
+        # 3. Print the command being executed for user confirmation/debugging
+        # Using ' '.join(shlex.quote(arg) for arg in cmd_list) ensures the
+        # printed command is safely quotable in case any arg has spaces,
+        # though it won't affect the execution below.
+        cmd_str = '+ ' + ' '.join(shlex.quote(p) for p in cmd)
+        print(cmd_str)
+
+        try:
+            # 4. Execute the command
+            # run() is generally preferred over call() or Popen() for simple
+            # execution check=True raises CalledProcessError if the command
+            # returns a non-zero exit code We don't use 'shell=True' here,
+            # which is safer and avoids shell quoting issues
+            subprocess.run(cmd, check=True)
+
+        except subprocess.CalledProcessError as e:
+            # Handle errors if the command fails
+            print(f"ERROR: failed {cmd_str!r} :: {e}")
+        except FileNotFoundError:
+            # Handle case where 'appman' executable isn't found
+            print("ERROR: 'appman' command not found. Ensure it is in your PATH.")
+
+        # 5. Wait for user input to return (similar to your original 'read FOO')
+        input('\n\n===== Press ENTER to return to vappman ====> ')
+
+        # 6. Update installs and re-enter curses (doupdate() in render does it)
+        self.installs, self.installs_by_appname = self.get_installed()
+        # Install/remove (and mode toggles) move the selected
+        # app between the installed and available sections;
+        # keep the cursor on the same *app*.
+        self.restore_selection(anchor)
+        self.win.render(redraw=True)
+
+def main():
+    """ The program """
+    parser = argparse.ArgumentParser( prog='vappman',
+        description='Interactive TUI for appman - application manager',
+        epilog='Run without options to start the interactive TUI')
+    parser.add_argument('--version', action='version',
+        version=f'%(prog)s {__version__}',
+        help='Show the vappman version and exit')
+    parser.add_argument( '--doctor', '--system-check',
+        action='store_true', dest='check_appimage',
+        help='Check system for AppImage compatibility issues')
+    parser.add_argument('--no-startup-check', action='store_true',
+        help='Skip quick AppImage compatibility check on startup')
+    parser.add_argument('--prereq', '--prerequisites',
+        action='store_true', dest='prereq_only',
+        help='Check and install prerequisites only, then exit')
+    parser.add_argument('--theme', default=None, metavar='NAME',
+        help='starting color theme; "mono" disables color '
+             '(the T picker remembers the choice)')
+    parser.add_argument('--no-color', action='store_true', dest='no_color',
+        help='disable color (the same as --theme mono)')
+
+    args = parser.parse_args()
+
+    # Handle standalone mode (--prereq and/or --doctor)
+    standalone_mode = args.check_appimage or args.prereq_only
+
+    if standalone_mode:
+        exit_code = 0
+
+        # Run prerequisite check if requested
+        if args.prereq_only:
+            prereq = Prerequisites()
+            prereq.check_preqreqs()
+            print()  # Blank line separator
+
+        # Run AppImage doctor check if requested
+        if args.check_appimage:
+            result = AppimageDoctor.main()
+            if result != 0:
+                exit_code = result
+
+        # Final summary message
+        if args.prereq_only and args.check_appimage:
+            print('\n' + '='*60)
+            print('System check complete.')
+            print('='*60)
+        elif args.prereq_only:
+            print('\nPrerequisite check complete.')
+
+        sys.exit(exit_code)
+
+    # Quick startup check for critical AppImage issues (unless disabled)
+    if not args.no_startup_check:
+        has_critical, status_lines = AppimageDoctor.quick_check()
+
+        # Always show the check results
+        print("AppImage compatibility check:")
+        for line in status_lines:
+            print(line)
+
+        if has_critical:
+            print(f"\n{notice_mark()} Critical issues found! "
+                  "Run 'vappman --check-appimage' for detailed fixes")
+            print("Starting TUI in 3 seconds...")
+            time.sleep(3)
+        print()
+
+    try:
+        appman = Vappman(cli_theme=args.theme, no_color=args.no_color)
+        appman.main_loop()
+    except KeyboardInterrupt:
+        pass
+    except Exception as exce:
+        # Tear down whatever exists (a failure before the window was created is common here,
+        # and stop_all() tolerates it).
+        ConsoleWindow.stop_all()
+        print("exception:", str(exce))
+        print(traceback.format_exc())
+
+if __name__ == '__main__':
+    main()
